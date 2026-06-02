@@ -38,6 +38,7 @@ const IMAGE_MIN_PIXELS = 655360;
 const IMAGE_MAX_PIXELS = 8294400;
 const IMAGE_MAX_EDGE = 3840;
 const IMAGE_MAX_RATIO = 3;
+const IMAGE_OUTPUT_FORMAT = "png";
 
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
@@ -207,6 +208,7 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
                 response_format: "b64_json",
+                output_format: IMAGE_OUTPUT_FORMAT,
             },
             {
                 headers: aiHeaders(config, "application/json"),
@@ -230,6 +232,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     formData.set("prompt", withSystemPrompt(config, requestPrompt));
     formData.set("n", String(n));
     formData.set("response_format", "b64_json");
+    formData.set("output_format", IMAGE_OUTPUT_FORMAT);
     if (quality) {
         formData.set("quality", quality);
     }
