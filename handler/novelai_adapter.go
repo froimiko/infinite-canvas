@@ -16,7 +16,7 @@ import (
 	"github.com/basketikun/infinite-canvas/service"
 )
 
-// NovelAI API 请求结构
+// NovelAI API 请求结构（完整 V4/V4.5 规范）
 type novelAIRequest struct {
 	Input      string            `json:"input"`
 	Model      string            `json:"model"`
@@ -25,20 +25,68 @@ type novelAIRequest struct {
 }
 
 type novelAIParameters struct {
-	Width          int     `json:"width"`
-	Height         int     `json:"height"`
-	Scale          float64 `json:"scale"`
-	Sampler        string  `json:"sampler"`
-	Steps          int     `json:"steps"`
-	NSamples       int     `json:"n_samples"`
-	Seed           int64   `json:"seed"`
-	NegativePrompt string  `json:"negative_prompt"`
-	UCPreset       int     `json:"ucPreset"`
-	QualityToggle  bool    `json:"qualityToggle"`
+	// 核心参数
+	ParamsVersion int     `json:"params_version"`
+	Width         int     `json:"width"`
+	Height        int     `json:"height"`
+	Scale         float64 `json:"scale"`
+	Sampler       string  `json:"sampler"`
+	Steps         int     `json:"steps"`
+	NSamples      int     `json:"n_samples"`
+	Seed          int64   `json:"seed"`
+	
+	// 负面提示词
+	NegativePrompt string `json:"negative_prompt"`
+	
+	// V4/V4.5 特性参数
+	UCPreset              int     `json:"ucPreset"`
+	QualityToggle         bool    `json:"qualityToggle"`
+	SkipCfgAboveSigma     *int    `json:"skip_cfg_above_sigma"` // Variety+: 58=on, null=off
+	CfgRescale            float64 `json:"cfg_rescale"`
+	
+	// V4 结构化 Prompt
+	V4Prompt         *v4PromptStructure `json:"v4_prompt,omitempty"`
+	V4NegativePrompt *v4PromptStructure `json:"v4_negative_prompt,omitempty"`
+	
+	// 固定参数（保持兼容性）
+	NoiseSchedule                string  `json:"noise_schedule"`
+	SM                           bool    `json:"sm"`
+	SMDyn                        bool    `json:"sm_dyn"`
+	DynamicThresholding          bool    `json:"dynamic_thresholding"`
+	ControlnetStrength           float64 `json:"controlnet_strength"`
+	Legacy                       bool    `json:"legacy"`
+	AddOriginalImage             bool    `json:"add_original_image"`
+	UncondScale                  float64 `json:"uncond_scale"`
+	DeliberateEulerAncestralBug  bool    `json:"deliberate_euler_ancestral_bug"`
+	PreferBrownian               bool    `json:"prefer_brownian"`
+	
 	// img2img 参数（Phase 3）
 	Image    string  `json:"image,omitempty"`
 	Strength float64 `json:"strength,omitempty"`
 	Noise    float64 `json:"noise,omitempty"`
+}
+
+// V4 Prompt 结构（用于多角色控制）
+type v4PromptStructure struct {
+	Caption   v4Caption `json:"caption"`
+	UseCoords bool      `json:"use_coords"`
+	UseOrder  bool      `json:"use_order"`
+	LegacyUC  bool      `json:"legacy_uc,omitempty"` // 仅用于 negative_prompt
+}
+
+type v4Caption struct {
+	BaseCaption  string          `json:"base_caption"`
+	CharCaptions []v4CharCaption `json:"char_captions"`
+}
+
+type v4CharCaption struct {
+	CharCaption string       `json:"char_caption"`
+	Centers     []v4Position `json:"centers"`
+}
+
+type v4Position struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // OpenAI 兼容请求结构（简化版）
@@ -67,23 +115,98 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 	// 映射质量参数
 	steps, scale := mapQualityToNovelAI(openAI.Quality, width, height)
 
+	// 判断模型版本（V4/V4.5 需要 v4_prompt 结构）
+	model := resolveNovelAIModel(openAI.Model)
+	isV4Model := strings.HasPrefix(model, "nai-diffusion-4")
+
+	// 准备 quality tags（V4 模型会自动添加）
+	qualityTags := ""
+	if isV4Model {
+		qualityTags = "very aesthetic, masterpiece, no text"
+	} else {
+		qualityTags = "masterpiece, best quality"
+	}
+
+	// 构建完整 input（提示词 + quality tags）
+	fullPrompt := openAI.Prompt
+	if qualityTags != "" {
+		fullPrompt = openAI.Prompt + ", " + qualityTags
+	}
+
+	// 负面提示词
+	negativePrompt := "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
+
 	// 构建 NovelAI 请求
 	naiReq := &novelAIRequest{
-		Input:  openAI.Prompt,
-		Model:  resolveNovelAIModel(openAI.Model),
-		Action: "generate", // 基础文生图
+		Input:  fullPrompt,
+		Model:  model,
+		Action: "generate",
 		Parameters: novelAIParameters{
+			// 核心参数
+			ParamsVersion:  3,
 			Width:          width,
 			Height:         height,
 			Scale:          scale,
-			Sampler:        "k_euler", // 默认采样器
+			Sampler:        "k_euler_ancestral",
 			Steps:          steps,
-			NSamples:       normalizeOpenAIImageCount(openAI.N),
+			NSamples:       1, // 强制单张
 			Seed:           0, // 随机种子
-			NegativePrompt: "lowres, bad anatomy, bad hands, text, error, missing fingers",
-			UCPreset:       0,
-			QualityToggle:  true,
+			NegativePrompt: negativePrompt,
+
+			// V4/V4.5 特性参数
+			UCPreset:          4, // None (不使用预设)
+			QualityToggle:     true,
+			SkipCfgAboveSigma: nil,  // Variety Off
+			CfgRescale:        0.0,
+
+			// 固定参数（官方文档推荐值）
+			NoiseSchedule:               "karras",
+			SM:                          false,
+			SMDyn:                       false,
+			DynamicThresholding:         false,
+			ControlnetStrength:          1.0,
+			Legacy:                      false,
+			AddOriginalImage:            true,
+			UncondScale:                 1.0,
+			DeliberateEulerAncestralBug: false,
+			PreferBrownian:              true,
 		},
+	}
+
+	// V4/V4.5 模型：添加结构化 Prompt
+	if isV4Model {
+		naiReq.Parameters.V4Prompt = &v4PromptStructure{
+			Caption: v4Caption{
+				BaseCaption: qualityTags,
+				CharCaptions: []v4CharCaption{
+					{
+						CharCaption: openAI.Prompt,
+						Centers: []v4Position{
+							{X: 0.5, Y: 0.5}, // 居中
+						},
+					},
+				},
+			},
+			UseCoords: false, // AI Choice
+			UseOrder:  true,
+		}
+
+		naiReq.Parameters.V4NegativePrompt = &v4PromptStructure{
+			Caption: v4Caption{
+				BaseCaption: negativePrompt,
+				CharCaptions: []v4CharCaption{
+					{
+						CharCaption: "",
+						Centers: []v4Position{
+							{X: 0.5, Y: 0.5},
+						},
+					},
+				},
+			},
+			UseCoords: false,
+			UseOrder:  true,
+			LegacyUC:  false,
+		}
 	}
 
 	return naiReq, nil
@@ -174,18 +297,32 @@ func mapQualityToNovelAI(quality string, width, height int) (steps int, scale fl
 func resolveNovelAIModel(modelName string) string {
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
 
-	// 简写映射
+	// V4.5 模型（最新）
+	if strings.Contains(modelName, "4.5") || strings.Contains(modelName, "v4.5") || strings.Contains(modelName, "4-5") {
+		return "nai-diffusion-4-5-full"
+	}
+	
+	// V4 模型
+	if strings.Contains(modelName, "nai-diffusion-4") || strings.Contains(modelName, "v4") {
+		return "nai-diffusion-4-curated"
+	}
+
+	// V3 模型
 	if strings.Contains(modelName, "nai-diffusion-3") || strings.Contains(modelName, "v3") {
 		return "nai-diffusion-3"
 	}
+	
+	// V2 模型
 	if strings.Contains(modelName, "nai-diffusion-2") || strings.Contains(modelName, "v2") {
 		return "nai-diffusion-2"
 	}
+	
+	// Furry 模型
 	if strings.Contains(modelName, "furry") {
 		return "nai-diffusion-furry"
 	}
 
-	// 默认使用最新模型
+	// 默认使用最新的 V3 模型（更稳定，V4 需要订阅）
 	return "nai-diffusion-3"
 }
 
