@@ -101,11 +101,11 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	}
 	// ========== NovelAI 协议分支结束 ==========
 
-	// OpenAI 协议：需要添加 /v1 前缀
+	// OpenAI 协议：添加 /v1 前缀（默认协议也是 OpenAI）
 	if channel.Protocol == "openai" || channel.Protocol == "" {
 		path = "/v1" + path
 	}
-
+	
 	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
 	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
 	if err != nil {
