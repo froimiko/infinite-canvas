@@ -78,7 +78,7 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			Scale:          scale,
 			Sampler:        "k_euler", // 默认采样器
 			Steps:          steps,
-			NSamples:       1, // 强制单张（项目已是分开请求）
+			NSamples:       normalizeOpenAIImageCount(openAI.N),
 			Seed:           0, // 随机种子
 			NegativePrompt: "lowres, bad anatomy, bad hands, text, error, missing fingers",
 			UCPreset:       0,
@@ -89,15 +89,37 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 	return naiReq, nil
 }
 
+func normalizeOpenAIImageCount(count int) int {
+	if count < 1 {
+		return 1
+	}
+	if count > 10 {
+		return 10
+	}
+	return count
+}
+
 // 解析 OpenAI 尺寸格式 "1024x1024" → width, height
 func parseOpenAISize(size string) (int, int, error) {
-	if size == "" || strings.ToLower(size) == "auto" {
+	size = strings.TrimSpace(size)
+	if size == "" || strings.EqualFold(size, "auto") {
 		return 1024, 1024, nil // 默认尺寸
 	}
 
-	var width, height int
-	if _, err := fmt.Sscanf(size, "%dx%d", &width, &height); err != nil {
+	parts := strings.Split(strings.ToLower(size), "x")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
 		return 0, 0, fmt.Errorf("无效的尺寸格式: %s（应为 1024x1024）", size)
+	}
+
+	var width, height int
+	if _, err := fmt.Sscan(strings.TrimSpace(parts[0]), &width); err != nil {
+		return 0, 0, fmt.Errorf("无效的尺寸格式: %s（应为 1024x1024）", size)
+	}
+	if _, err := fmt.Sscan(strings.TrimSpace(parts[1]), &height); err != nil {
+		return 0, 0, fmt.Errorf("无效的尺寸格式: %s（应为 1024x1024）", size)
+	}
+	if width <= 0 || height <= 0 {
+		return 0, 0, fmt.Errorf("无效的尺寸格式: %s（宽高必须为正整数）", size)
 	}
 
 	// NovelAI 要求尺寸必须是 64 的倍数
@@ -175,8 +197,8 @@ func convertNovelAIResponse(zipData []byte) ([]byte, error) {
 		return nil, fmt.Errorf("解压 NovelAI 响应失败: %w", err)
 	}
 
-	// 查找第一个图片文件
-	var imageData []byte
+	// 查找所有图片文件
+	data := make([]map[string]interface{}, 0, len(zipReader.File))
 	for _, file := range zipReader.File {
 		// 跳过目录和非图片文件
 		if file.FileInfo().IsDir() || !isImageFile(file.Name) {
@@ -188,28 +210,24 @@ func convertNovelAIResponse(zipData []byte) ([]byte, error) {
 		if err != nil {
 			continue
 		}
-		imageData, err = io.ReadAll(rc)
+		imageData, err := io.ReadAll(rc)
 		rc.Close()
-		if err != nil {
+		if err != nil || len(imageData) == 0 {
 			continue
 		}
-		break // 只取第一张图
+
+		data = append(data, map[string]interface{}{
+			"b64_json": base64.StdEncoding.EncodeToString(imageData),
+		})
 	}
 
-	if len(imageData) == 0 {
+	if len(data) == 0 {
 		return nil, errors.New("NovelAI 响应中未找到有效图片")
 	}
 
-	// 转为 base64
-	base64Image := base64.StdEncoding.EncodeToString(imageData)
-
 	// 构建 OpenAI 兼容响应
 	response := map[string]interface{}{
-		"data": []map[string]interface{}{
-			{
-				"b64_json": base64Image,
-			},
-		},
+		"data": data,
 	}
 
 	return json.Marshal(response)
