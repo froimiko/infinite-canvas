@@ -92,6 +92,7 @@ type v4Position struct {
 type openAIImageRequest struct {
 	Model          string `json:"model"`
 	Prompt         string `json:"prompt"`
+	NegativePrompt string `json:"negative_prompt"`
 	N              int    `json:"n"`
 	Size           string `json:"size"`
 	Quality        string `json:"quality"`
@@ -132,8 +133,11 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 		fullPrompt = openAI.Prompt + ", " + qualityTags
 	}
 
-	// 负面提示词
-	negativePrompt := "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
+	// 负面提示词：OpenAI 兼容层允许 NAI 分支消费 negative_prompt；未传入时保留既有默认值。
+	negativePrompt := strings.TrimSpace(openAI.NegativePrompt)
+	if negativePrompt == "" {
+		negativePrompt = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
+	}
 
 	// 构建 NovelAI 请求
 	naiReq := &novelAIRequest{
