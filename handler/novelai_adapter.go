@@ -225,7 +225,7 @@ func isImageFile(filename string) bool {
 }
 
 // NovelAI 代理请求主函数
-func proxyNovelAIImageRequest(w http.ResponseWriter, r *http.Request, body []byte, channel model.ModelChannel, user model.User, credits int) {
+func proxyNovelAIImageRequest(w http.ResponseWriter, r *http.Request, body []byte, channel model.ModelChannel, user model.AuthUser, credits int) {
 	// 0. 解析 OpenAI 请求（用于免费生图锁校验）
 	var openAIReq openAIImageRequest
 	if err := json.Unmarshal(body, &openAIReq); err != nil {
