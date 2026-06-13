@@ -194,16 +194,26 @@ function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) 
     return systemPrompt ? [{ role: "system" as const, content: systemPrompt }, ...messages] : messages;
 }
 
-export async function requestGeneration(config: AiConfig, prompt: string) {
+export type ImageRequestOptions = {
+    negativePrompt?: string;
+};
+
+function normalizedNegativePrompt(options?: ImageRequestOptions) {
+    return options?.negativePrompt?.trim() || "";
+}
+
+export async function requestGeneration(config: AiConfig, prompt: string, options?: ImageRequestOptions) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
+    const negativePrompt = normalizedNegativePrompt(options);
     try {
         const response = await axios.post<ImageApiResponse>(
             aiApiUrl(config, "/images/generations"),
             {
                 model: config.model,
                 prompt: withSystemPrompt(config, prompt),
+                ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
                 n,
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
@@ -222,14 +232,16 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
     }
 }
 
-export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage) {
+export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: ImageRequestOptions) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const requestPrompt = buildImageReferencePromptText(prompt, references);
+    const negativePrompt = normalizedNegativePrompt(options);
     const formData = new FormData();
     formData.set("model", config.model);
     formData.set("prompt", withSystemPrompt(config, requestPrompt));
+    if (negativePrompt) formData.set("negative_prompt", negativePrompt);
     formData.set("n", String(n));
     formData.set("response_format", "b64_json");
     formData.set("output_format", IMAGE_OUTPUT_FORMAT);

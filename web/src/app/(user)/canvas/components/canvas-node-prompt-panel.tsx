@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUp, LoaderCircle } from "lucide-react";
-import { Button } from "antd";
+import { ArrowUp, ChevronDown, LoaderCircle } from "lucide-react";
+import { Button, Input } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -40,15 +40,21 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
+    const [negativePromptOpen, setNegativePromptOpen] = useState(Boolean(node.metadata?.negativePrompt?.trim()));
     const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1 });
 
     useEffect(() => {
         setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");
+        setNegativePromptOpen(Boolean(node.metadata?.negativePrompt?.trim()));
     }, [isEditingExistingContent, node.id]);
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
         if (!isEditingExistingContent) onPromptChange(node.id, value);
+    };
+
+    const updateNegativePrompt = (value: string) => {
+        onConfigChange(node.id, { negativePrompt: value });
     };
 
     const submit = () => {
@@ -75,6 +81,21 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
+
+            {mode === "image" ? (
+                <div className="mt-2 rounded-xl border px-2 py-1.5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
+                    <button type="button" className="flex w-full items-center justify-between text-xs font-medium" style={{ color: theme.node.muted }} onClick={() => setNegativePromptOpen((open) => !open)}>
+                        <span>负面提示词（NAI）</span>
+                        <span className="inline-flex items-center gap-1">
+                            {node.metadata?.negativePrompt?.trim() ? "已填写" : "默认"}
+                            <ChevronDown className={`size-3 transition ${negativePromptOpen ? "rotate-180" : ""}`} />
+                        </span>
+                    </button>
+                    {negativePromptOpen ? (
+                        <Input.TextArea value={node.metadata?.negativePrompt || ""} onChange={(event) => updateNegativePrompt(event.target.value)} rows={2} className="!mt-1.5 !resize-none !text-xs" placeholder="留空使用默认负面提示词" />
+                    ) : null}
+                </div>
+            ) : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -105,13 +126,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
                     )}
                 </div>
-                <Button
-                    type="primary"
-                    className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
-                    disabled={isRunning || !prompt.trim()}
-                    onClick={submit}
-                    aria-label="生成"
-                >
+                <Button type="primary" className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3" disabled={isRunning || !prompt.trim()} onClick={submit} aria-label="生成">
                     <span className="flex items-center gap-1.5">
                         <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
                             <CreditSymbol />

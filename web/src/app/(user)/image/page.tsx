@@ -44,6 +44,7 @@ type GenerationLog = {
     createdAt: number;
     title: string;
     prompt: string;
+    negativePrompt?: string;
     time: string;
     model: string;
     config: GenerationLogConfig;
@@ -77,6 +78,7 @@ export default function ImagePage() {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
+    const [negativePrompt, setNegativePrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
@@ -177,6 +179,7 @@ export default function ImagePage() {
             saveLog(
                 buildLog({
                     prompt: text,
+                    negativePrompt: snapshot.negativePrompt,
                     model,
                     config: { ...snapshot.config, count: String(generationCount) },
                     references: snapshot.references,
@@ -231,6 +234,7 @@ export default function ImagePage() {
 
     const createSession = () => {
         setPrompt("");
+        setNegativePrompt("");
         setReferences([]);
         setResults([]);
         setElapsedMs(0);
@@ -260,6 +264,7 @@ export default function ImagePage() {
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
+        setNegativePrompt(log.negativePrompt || "");
         setReferences(log.references || []);
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
@@ -279,13 +284,14 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        return { text, negativePrompt: negativePrompt.trim(), config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (index: number, snapshot: { text: string; negativePrompt: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            const requestOptions = snapshot.negativePrompt ? { negativePrompt: snapshot.negativePrompt } : undefined;
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
@@ -353,6 +359,14 @@ export default function ImagePage() {
                                     </div>
                                 </div>
                                 <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder="描述画面主体、风格、构图、光线和用途" />
+                            </div>
+
+                            <div>
+                                <div className="mb-2 flex items-center justify-between gap-3">
+                                    <span className="text-base font-semibold">负面提示词（NAI）</span>
+                                    <span className="text-xs text-stone-500 dark:text-stone-400">留空使用默认</span>
+                                </div>
+                                <Input.TextArea value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} rows={3} placeholder="例如：lowres, bad anatomy, blurry" />
                             </div>
 
                             <div className="min-w-0">
@@ -643,7 +657,9 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     return (
         <button
             type="button"
-            className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`}
+            className={`block w-full rounded-lg border p-2 text-left transition ${
+                active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"
+            }`}
             onClick={onClick}
         >
             <div className="grid grid-cols-[minmax(128px,1fr)_auto] gap-2">
@@ -719,6 +735,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         createdAt: log.createdAt || Date.now(),
         title: log.title || log.model || "未命名",
         prompt: log.prompt || log.title || "",
+        negativePrompt: log.negativePrompt || "",
         time: log.time || new Date().toLocaleString("zh-CN", { hour12: false }),
         model: log.model || config.imageModel || "",
         config,
@@ -774,6 +791,7 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
 
 function buildLog({
     prompt,
+    negativePrompt,
     model,
     config,
     references,
@@ -784,6 +802,7 @@ function buildLog({
     images,
 }: {
     prompt: string;
+    negativePrompt?: string;
     model: string;
     config: GenerationLogConfig;
     references: ReferenceImage[];
@@ -805,6 +824,7 @@ function buildLog({
         createdAt: Date.now(),
         title: prompt.slice(0, 12) || "未命名",
         prompt,
+        negativePrompt: negativePrompt?.trim() || "",
         time: new Date().toLocaleString("zh-CN", { hour12: false }),
         model,
         config: logConfig,

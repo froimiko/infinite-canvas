@@ -25,6 +25,7 @@ export type CanvasNodeMetadata = {
     content?: string;
     composerContent?: string;
     prompt?: string;
+    negativePrompt?: string;
     status?: CanvasNodeStatus;
     errorDetails?: string;
     fontSize?: number;
