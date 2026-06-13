@@ -3,7 +3,9 @@ package handler
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,10 +13,13 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/basketikun/infinite-canvas/model"
 	"github.com/basketikun/infinite-canvas/service"
 )
+
+var novelAIFreeGenerationLocks sync.Map // map[string]*sync.Mutex，key 为 baseURL+APIKey 的 SHA-256，避免泄露 Token。
 
 // NovelAI API 请求结构（完整 V4/V4.5 规范）
 type novelAIRequest struct {
@@ -526,6 +531,29 @@ func requestNovelAISingleImageBatch(openAIReq openAIImageRequest, count int, cha
 	return merged, succeededCount, nil
 }
 
+func withNovelAIFreeGenerationLock(channel model.ModelChannel, fn func() ([]map[string]interface{}, error)) ([]map[string]interface{}, error) {
+	if channel.FreeGenerationLock == nil || !channel.FreeGenerationLock.Enabled {
+		return fn()
+	}
+
+	key := novelAIFreeGenerationLockKey(channel)
+	value, _ := novelAIFreeGenerationLocks.LoadOrStore(key, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
+	return fn()
+}
+
+func novelAIFreeGenerationLockKey(channel model.ModelChannel) string {
+	baseURL := strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = "https://image.novelai.net"
+	}
+	sum := sha256.Sum256([]byte(baseURL + "\x00" + channel.APIKey))
+	return hex.EncodeToString(sum[:])
+}
+
 func requestNovelAIImageData(channel model.ModelChannel, naiReq *novelAIRequest) ([]map[string]interface{}, error) {
 	naiBody, err := json.Marshal(naiReq)
 	if err != nil {
@@ -540,30 +568,32 @@ func requestNovelAIImageData(channel model.ModelChannel, naiReq *novelAIRequest)
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
 	request.Header.Set("Content-Type", "application/json")
 
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		log.Printf("NovelAI request failed: url=%s err=%v", naiURL, err)
-		return nil, errors.New("NovelAI 接口请求失败")
-	}
-	defer response.Body.Close()
+	return withNovelAIFreeGenerationLock(channel, func() ([]map[string]interface{}, error) {
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			log.Printf("NovelAI request failed: url=%s err=%v", naiURL, err)
+			return nil, errors.New("NovelAI 接口请求失败")
+		}
+		defer response.Body.Close()
 
-	if response.StatusCode >= http.StatusBadRequest {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		log.Printf("NovelAI upstream error: status=%d body=%s", response.StatusCode, string(body))
-		return nil, errors.New(readNovelAIError(response.StatusCode, body))
-	}
+		if response.StatusCode >= http.StatusBadRequest {
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+			log.Printf("NovelAI upstream error: status=%d body=%s", response.StatusCode, string(body))
+			return nil, errors.New(readNovelAIError(response.StatusCode, body))
+		}
 
-	zipData, err := io.ReadAll(response.Body)
-	if err != nil {
-		log.Printf("NovelAI response read failed: %v", err)
-		return nil, errors.New("读取 NovelAI 响应失败")
-	}
-	data, err := extractNovelAIImageData(zipData)
-	if err != nil {
-		log.Printf("NovelAI response conversion failed: %v", err)
-		return nil, fmt.Errorf("NovelAI 响应转换失败: %w", err)
-	}
-	return data, nil
+		zipData, err := io.ReadAll(response.Body)
+		if err != nil {
+			log.Printf("NovelAI response read failed: %v", err)
+			return nil, errors.New("读取 NovelAI 响应失败")
+		}
+		data, err := extractNovelAIImageData(zipData)
+		if err != nil {
+			log.Printf("NovelAI response conversion failed: %v", err)
+			return nil, fmt.Errorf("NovelAI 响应转换失败: %w", err)
+		}
+		return data, nil
+	})
 }
 
 // 构建 NovelAI URL

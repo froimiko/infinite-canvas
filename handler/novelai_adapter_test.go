@@ -2,8 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"sync/atomic"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/basketikun/infinite-canvas/model"
 )
 
 const defaultNovelAINegativePrompt = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
@@ -51,6 +55,116 @@ func TestConvertToNovelAIRequestSyncsV4NegativePrompt(t *testing.T) {
 	}
 	if got := req.Parameters.V4NegativePrompt.Caption.BaseCaption; got != userNegativePrompt {
 		t.Fatalf("v4 negative base caption = %q, want %q", got, userNegativePrompt)
+	}
+}
+
+func TestWithNovelAIFreeGenerationLockSerializesSameToken(t *testing.T) {
+	channel := model.ModelChannel{
+		BaseURL: "https://image.novelai.net/",
+		APIKey:  "same-token",
+		FreeGenerationLock: &model.FreeGenerationLock{
+			Enabled: true,
+		},
+	}
+
+	var active int32
+	var maxActive int32
+	releaseFirst := make(chan struct{})
+	firstStarted := make(chan struct{})
+	done := make(chan error, 2)
+
+	call := func(id int) {
+		_, err := withNovelAIFreeGenerationLock(channel, func() ([]map[string]interface{}, error) {
+			current := atomic.AddInt32(&active, 1)
+			for {
+				max := atomic.LoadInt32(&maxActive)
+				if current <= max || atomic.CompareAndSwapInt32(&maxActive, max, current) {
+					break
+				}
+			}
+			if id == 1 {
+				close(firstStarted)
+				<-releaseFirst
+			}
+			atomic.AddInt32(&active, -1)
+			return []map[string]interface{}{{"id": id}}, nil
+		})
+		done <- err
+	}
+
+	go call(1)
+	<-firstStarted
+	go call(2)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("first call returned unexpected error: %v", err)
+		}
+		t.Fatal("second call should wait for same channel/token lock")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(releaseFirst)
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("locked call returned error: %v", err)
+		}
+	}
+	if maxActive != 1 {
+		t.Fatalf("max active same-token calls = %d, want 1", maxActive)
+	}
+}
+
+func TestWithNovelAIFreeGenerationLockAllowsDifferentTokens(t *testing.T) {
+	channelA := model.ModelChannel{
+		BaseURL: "https://image.novelai.net",
+		APIKey:  "token-a",
+		FreeGenerationLock: &model.FreeGenerationLock{
+			Enabled: true,
+		},
+	}
+	channelB := model.ModelChannel{
+		BaseURL: "https://image.novelai.net",
+		APIKey:  "token-b",
+		FreeGenerationLock: &model.FreeGenerationLock{
+			Enabled: true,
+		},
+	}
+
+	startedA := make(chan struct{})
+	releaseA := make(chan struct{})
+	done := make(chan error, 2)
+
+	go func() {
+		_, err := withNovelAIFreeGenerationLock(channelA, func() ([]map[string]interface{}, error) {
+			close(startedA)
+			<-releaseA
+			return []map[string]interface{}{{"token": "a"}}, nil
+		})
+		done <- err
+	}()
+	<-startedA
+
+	go func() {
+		_, err := withNovelAIFreeGenerationLock(channelB, func() ([]map[string]interface{}, error) {
+			return []map[string]interface{}{{"token": "b"}}, nil
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("different-token call returned error: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("different token should not wait for channelA lock")
+	}
+
+	close(releaseA)
+	if err := <-done; err != nil {
+		t.Fatalf("released call returned error: %v", err)
 	}
 }
 
