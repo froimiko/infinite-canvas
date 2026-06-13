@@ -81,7 +81,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "AI 接口请求失败")
 		return
 	}
-	credits *= readAIRequestCount(body, contentType)
+	requestCount := readAIRequestCount(body, contentType)
 	channel, err := service.SelectModelChannel(modelName)
 	if err != nil {
 		log.Printf("AI proxy select channel failed: model=%s err=%v", modelName, err)
@@ -100,6 +100,8 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	// ========== NovelAI 协议分支结束 ==========
+
+	credits *= requestCount
 
 	// OpenAI 协议：添加 /v1 前缀（默认协议也是 OpenAI）
 	if channel.Protocol == "openai" || channel.Protocol == "" {

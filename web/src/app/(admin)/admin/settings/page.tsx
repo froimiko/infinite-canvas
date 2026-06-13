@@ -699,7 +699,7 @@ export default function AdminSettingsPage() {
                             </Col>
                             {/* NovelAI 免费生图锁配置 */}
                             <Col span={24}>
-                                <Form.Item label="免费生图锁（NovelAI Opus）" tooltip="启用后强制符合 NovelAI Opus 无限免费生图条件：≤1024×1024、≤28步、单张、纯文生图">
+                                <Form.Item label="免费生图锁（NovelAI Opus）" tooltip="启用后强制符合 NovelAI Opus 无限免费生图条件：单个上游请求单图、≤1024×1024、≤28步、纯文生图；多张会拆分为多个并发单图请求。">
                                     <Space direction="vertical" className="w-full" size={12}>
                                         <Form.Item name={["freeGenerationLock", "enabled"]} valuePropName="checked" noStyle>
                                             <Checkbox>启用免费生图锁（防止意外扣费）</Checkbox>
@@ -715,7 +715,8 @@ export default function AdminSettingsPage() {
                                                         <div className="mb-4 rounded-md border border-orange-300 bg-orange-100 p-3 dark:border-orange-700 dark:bg-orange-900/40">
                                                             <div className="mb-2 text-sm font-medium text-orange-900 dark:text-orange-200">启用后将强制以下限制：</div>
                                                             <ul className="m-0 list-disc space-y-1 pl-5 text-xs text-orange-800 dark:text-orange-300">
-                                                                <li>单次只能生成 1 张图片（n=1）</li>
+                                                                <li>单个 NovelAI 上游请求只生成 1 张图片（n_samples=1）</li>
+                                                                <li>前端选择多张时会拆成多个并发单图请求</li>
                                                                 <li>总像素 ≤ 1024×1024（约 1MP）</li>
                                                                 <li>采样步数 ≤ 28</li>
                                                                 <li>不支持图生图/参考图功能</li>
@@ -734,7 +735,7 @@ export default function AdminSettingsPage() {
                                                             </Col>
                                                             <Col span={12}>
                                                                 <Form.Item name={["freeGenerationLock", "forceCountOne"]} valuePropName="checked">
-                                                                    <Checkbox>强制单张生成（n=1）</Checkbox>
+                                                                    <Checkbox>强制单个上游请求单图（多张自动并发拆分）</Checkbox>
                                                                 </Form.Item>
                                                             </Col>
                                                             <Col span={12}>

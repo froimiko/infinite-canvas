@@ -326,6 +326,14 @@ func resolveNovelAIModel(modelName string) string {
 
 // 转换 NovelAI ZIP 响应为 OpenAI JSON 格式
 func convertNovelAIResponse(zipData []byte) ([]byte, error) {
+	data, err := extractNovelAIImageData(zipData)
+	if err != nil {
+		return nil, err
+	}
+	return marshalOpenAIImageResponse(data)
+}
+
+func extractNovelAIImageData(zipData []byte) ([]map[string]interface{}, error) {
 	// 读取 ZIP 文件
 	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
@@ -359,13 +367,13 @@ func convertNovelAIResponse(zipData []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, errors.New("NovelAI 响应中未找到有效图片")
 	}
+	return data, nil
+}
 
-	// 构建 OpenAI 兼容响应
-	response := map[string]interface{}{
+func marshalOpenAIImageResponse(data []map[string]interface{}) ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
 		"data": data,
-	}
-
-	return json.Marshal(response)
+	})
 }
 
 // 判断是否为图片文件
@@ -395,89 +403,163 @@ func proxyNovelAIImageRequest(w http.ResponseWriter, r *http.Request, body []byt
 		return
 	}
 
-	// 1. 转换请求格式
-	naiReq, err := convertToNovelAIRequest(body)
+	requestCount := normalizeOpenAIImageCount(openAIReq.N)
+	forceSingleRequests := channel.FreeGenerationLock != nil && channel.FreeGenerationLock.Enabled
+	if forceSingleRequests {
+		openAIReq.N = 1
+	}
+
+	// 1. 先转换一次，确定模型名并在上游请求前扣费
+	sampleBody, err := json.Marshal(openAIReq)
+	if err != nil {
+		Fail(w, "构建 NovelAI 请求失败")
+		return
+	}
+	sampleReq, err := convertToNovelAIRequest(sampleBody)
 	if err != nil {
 		log.Printf("NovelAI request conversion failed: %v", err)
 		Fail(w, fmt.Sprintf("请求格式转换失败: %v", err))
 		return
 	}
 
-	// 2. 构建 NovelAI API 请求
-	naiBody, err := json.Marshal(naiReq)
-	if err != nil {
-		Fail(w, "构建 NovelAI 请求失败")
-		return
-	}
-
-	// NovelAI 图像生成端点
-	naiURL := buildNovelAIURL(channel.BaseURL, "/ai/generate-image")
-
-	request, err := http.NewRequest(http.MethodPost, naiURL, bytes.NewReader(naiBody))
-	if err != nil {
-		Fail(w, "创建 NovelAI 请求失败")
-		return
-	}
-
-	// 3. 设置请求头
-	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
-	request.Header.Set("Content-Type", "application/json")
-
-	// 4. 扣费
-	if err := service.ConsumeUserCredits(user.ID, naiReq.Model, credits, "/images/generations"); err != nil {
+	totalCredits := credits * requestCount
+	if err := service.ConsumeUserCredits(user.ID, sampleReq.Model, totalCredits, "/images/generations"); err != nil {
 		FailError(w, err)
 		return
 	}
 
-	// 5. 发送请求
-	response, err := http.DefaultClient.Do(request)
+	var data []map[string]interface{}
+	var requestErr error
+	succeededCount := requestCount
+	if forceSingleRequests && requestCount > 1 {
+		data, succeededCount, requestErr = requestNovelAISingleImageBatch(openAIReq, requestCount, channel)
+	} else {
+		data, requestErr = requestNovelAIImageData(channel, sampleReq)
+	}
+	if requestErr != nil {
+		if err := service.RefundUserCredits(user.ID, sampleReq.Model, totalCredits, "/images/generations"); err != nil {
+			log.Printf("Refund failed: %v", err)
+		}
+		Fail(w, requestErr.Error())
+		return
+	}
+	jsonResponse, err := marshalOpenAIImageResponse(data)
 	if err != nil {
-		log.Printf("NovelAI request failed: url=%s err=%v", naiURL, err)
-		if err := service.RefundUserCredits(user.ID, naiReq.Model, credits, "/images/generations"); err != nil {
+		if err := service.RefundUserCredits(user.ID, sampleReq.Model, totalCredits, "/images/generations"); err != nil {
 			log.Printf("Refund failed: %v", err)
 		}
-		Fail(w, "NovelAI 接口请求失败")
+		Fail(w, "构建 NovelAI 响应失败")
 		return
 	}
-	defer response.Body.Close()
-
-	// 6. 检查响应状态
-	if response.StatusCode >= http.StatusBadRequest {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		log.Printf("NovelAI upstream error: status=%d body=%s", response.StatusCode, string(body))
-		if err := service.RefundUserCredits(user.ID, naiReq.Model, credits, "/images/generations"); err != nil {
-			log.Printf("Refund failed: %v", err)
+	if succeededCount < requestCount {
+		refundCredits := credits * (requestCount - succeededCount)
+		if err := service.RefundUserCredits(user.ID, sampleReq.Model, refundCredits, "/images/generations"); err != nil {
+			log.Printf("Partial refund failed: %v", err)
 		}
-		Fail(w, readNovelAIError(response.StatusCode, body))
-		return
 	}
 
-	// 7. 读取 ZIP 响应
-	zipData, err := io.ReadAll(response.Body)
-	if err != nil {
-		log.Printf("NovelAI response read failed: %v", err)
-		if err := service.RefundUserCredits(user.ID, naiReq.Model, credits, "/images/generations"); err != nil {
-			log.Printf("Refund failed: %v", err)
-		}
-		Fail(w, "读取 NovelAI 响应失败")
-		return
-	}
-
-	// 8. 转换为 OpenAI JSON 格式
-	jsonResponse, err := convertNovelAIResponse(zipData)
-	if err != nil {
-		log.Printf("NovelAI response conversion failed: %v", err)
-		if err := service.RefundUserCredits(user.ID, naiReq.Model, credits, "/images/generations"); err != nil {
-			log.Printf("Refund failed: %v", err)
-		}
-		Fail(w, fmt.Sprintf("NovelAI 响应转换失败: %v", err))
-		return
-	}
-
-	// 9. 返回响应
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(jsonResponse)
+}
+
+type novelAIImageBatchResult struct {
+	Index int
+	Data  []map[string]interface{}
+	Err   error
+}
+
+func requestNovelAISingleImageBatch(openAIReq openAIImageRequest, count int, channel model.ModelChannel) ([]map[string]interface{}, int, error) {
+	resultCh := make(chan novelAIImageBatchResult, count)
+	for index := 0; index < count; index++ {
+		go func(index int) {
+			slotReq := openAIReq
+			slotReq.N = 1
+			body, err := json.Marshal(slotReq)
+			if err != nil {
+				resultCh <- novelAIImageBatchResult{Index: index, Err: err}
+				return
+			}
+			naiReq, err := convertToNovelAIRequest(body)
+			if err != nil {
+				resultCh <- novelAIImageBatchResult{Index: index, Err: err}
+				return
+			}
+			data, err := requestNovelAIImageData(channel, naiReq)
+			resultCh <- novelAIImageBatchResult{Index: index, Data: data, Err: err}
+		}(index)
+	}
+
+	ordered := make([][]map[string]interface{}, count)
+	var firstErr error
+	succeededCount := 0
+	for index := 0; index < count; index++ {
+		result := <-resultCh
+		if result.Err != nil {
+			log.Printf("NovelAI single-image request failed: slot=%d err=%v", result.Index, result.Err)
+			if firstErr == nil {
+				firstErr = result.Err
+			}
+			continue
+		}
+		succeededCount++
+		ordered[result.Index] = result.Data
+	}
+
+	merged := make([]map[string]interface{}, 0, count)
+	for _, item := range ordered {
+		merged = append(merged, item...)
+	}
+	if len(merged) == 0 {
+		if firstErr != nil {
+			return nil, 0, firstErr
+		}
+		return nil, 0, errors.New("NovelAI 响应中未找到有效图片")
+	}
+	if firstErr != nil {
+		log.Printf("NovelAI batch completed with partial failures: requested=%d succeeded=%d", count, succeededCount)
+	}
+	return merged, succeededCount, nil
+}
+
+func requestNovelAIImageData(channel model.ModelChannel, naiReq *novelAIRequest) ([]map[string]interface{}, error) {
+	naiBody, err := json.Marshal(naiReq)
+	if err != nil {
+		return nil, errors.New("构建 NovelAI 请求失败")
+	}
+
+	naiURL := buildNovelAIURL(channel.BaseURL, "/ai/generate-image")
+	request, err := http.NewRequest(http.MethodPost, naiURL, bytes.NewReader(naiBody))
+	if err != nil {
+		return nil, errors.New("创建 NovelAI 请求失败")
+	}
+	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		log.Printf("NovelAI request failed: url=%s err=%v", naiURL, err)
+		return nil, errors.New("NovelAI 接口请求失败")
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= http.StatusBadRequest {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		log.Printf("NovelAI upstream error: status=%d body=%s", response.StatusCode, string(body))
+		return nil, errors.New(readNovelAIError(response.StatusCode, body))
+	}
+
+	zipData, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Printf("NovelAI response read failed: %v", err)
+		return nil, errors.New("读取 NovelAI 响应失败")
+	}
+	data, err := extractNovelAIImageData(zipData)
+	if err != nil {
+		log.Printf("NovelAI response conversion failed: %v", err)
+		return nil, fmt.Errorf("NovelAI 响应转换失败: %w", err)
+	}
+	return data, nil
 }
 
 // 构建 NovelAI URL
@@ -495,10 +577,9 @@ func applyFreeGenerationLock(req *openAIImageRequest, lock *model.FreeGeneration
 		return nil
 	}
 
-	// 1. 强制单张生成
-	if lock.ForceCountOne && req.N > 1 {
-		return fmt.Errorf("该渠道已启用免费生图锁，仅支持单次生成 1 张图片（n=%d 不符合要求，需 n=1）", req.N)
-	}
+	// 1. 强制单张上游请求
+	// 免费模式限制的是单个 NovelAI generation request 必须 n_samples=1；
+	// 外层 OpenAI n>1 会在代理层拆成多个并发的单图请求，不在这里拒绝。
 
 	// 2. 禁用图生图
 	if lock.DisableImg2Img && hasReferenceImages {
