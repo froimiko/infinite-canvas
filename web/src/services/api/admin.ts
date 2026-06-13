@@ -157,7 +157,7 @@ export async function deleteAdminAsset(token: string, id: string) {
 }
 
 export type AdminModelChannel = {
-    protocol: "openai";
+    protocol: string;
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -165,6 +165,13 @@ export type AdminModelChannel = {
     weight: number;
     enabled: boolean;
     remark: string;
+    freeGenerationLock?: {
+        enabled: boolean;
+        maxPixels: number;
+        maxSteps: number;
+        forceCountOne: boolean;
+        disableImg2Img: boolean;
+    };
 };
 
 export type AdminPublicModelChannelSettings = {

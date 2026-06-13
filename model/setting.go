@@ -11,14 +11,24 @@ const (
 
 // ModelChannel 模型渠道配置。
 type ModelChannel struct {
-	Protocol string   `json:"protocol"`
-	Name     string   `json:"name"`
-	BaseURL  string   `json:"baseUrl"`
-	APIKey   string   `json:"apiKey"`
-	Models   []string `json:"models"`
-	Weight   int      `json:"weight"`
-	Enabled  bool     `json:"enabled"`
-	Remark   string   `json:"remark"`
+	Protocol           string                `json:"protocol"`
+	Name               string                `json:"name"`
+	BaseURL            string                `json:"baseUrl"`
+	APIKey             string                `json:"apiKey"`
+	Models             []string              `json:"models"`
+	Weight             int                   `json:"weight"`
+	Enabled            bool                  `json:"enabled"`
+	Remark             string                `json:"remark"`
+	FreeGenerationLock *FreeGenerationLock   `json:"freeGenerationLock,omitempty"` // NovelAI 免费生图锁（Phase 2）
+}
+
+// FreeGenerationLock NovelAI 免费生图锁配置（Opus 套餐无限免费生图条件）
+type FreeGenerationLock struct {
+	Enabled        bool `json:"enabled"`        // 是否启用免费生图锁
+	MaxPixels      int  `json:"maxPixels"`      // 最大总像素（默认 1048576 = 1024×1024）
+	MaxSteps       int  `json:"maxSteps"`       // 最大步数（默认 28）
+	ForceCountOne  bool `json:"forceCountOne"`  // 强制单张生成（默认 true）
+	DisableImg2Img bool `json:"disableImg2Img"` // 禁用图生图（默认 true）
 }
 
 // ModelCost 模型算力点配置。

@@ -40,7 +40,23 @@ const emptySettings: AdminSettings = {
     },
     private: { channels: [], promptSync: { enabled: true, cron: "*/5 * * * *" }, auth: { linuxDo: { clientId: "", clientSecret: "" } } },
 };
-const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, enabled: true, remark: "" };
+const emptyChannel: AdminModelChannel = {
+    protocol: "openai",
+    name: "",
+    baseUrl: "",
+    apiKey: "",
+    models: [],
+    weight: 1,
+    enabled: true,
+    remark: "",
+    freeGenerationLock: {
+        enabled: false,
+        maxPixels: 1048576, // 1024×1024
+        maxSteps: 28,
+        forceCountOne: true,
+        disableImg2Img: true,
+    },
+};
 
 type SettingsTabKey = "public" | "private";
 type EditorMode = "visual" | "json";
@@ -467,15 +483,7 @@ export default function AdminSettingsPage() {
                                                     dataIndex: "credits",
                                                     width: 220,
                                                     render: (_, item) => (
-                                                        <InputNumber
-                                                            min={0}
-                                                            step={1}
-                                                            precision={0}
-                                                            className="!w-full"
-                                                            value={item.credits}
-                                                            addonAfter="点"
-                                                            onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)}
-                                                        />
+                                                        <InputNumber min={0} step={1} precision={0} className="!w-full" value={item.credits} addonAfter="点" onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
                                                     ),
                                                 },
                                             ]}
@@ -673,6 +681,59 @@ export default function AdminSettingsPage() {
                             <Col span={24}>
                                 <Form.Item name="remark" label="备注">
                                     <Input.TextArea rows={3} />
+                                </Form.Item>
+                            </Col>
+                            {/* NovelAI 免费生图锁配置 */}
+                            <Col span={24}>
+                                <Form.Item label="免费生图锁（NovelAI Opus）" tooltip="启用后强制符合 NovelAI Opus 无限免费生图条件：≤1024×1024、≤28步、单张、纯文生图">
+                                    <Space direction="vertical" className="w-full" size={12}>
+                                        <Form.Item name={["freeGenerationLock", "enabled"]} valuePropName="checked" noStyle>
+                                            <Checkbox>启用免费生图锁（防止意外扣费）</Checkbox>
+                                        </Form.Item>
+
+                                        <Form.Item noStyle shouldUpdate={(prev, cur) => prev.freeGenerationLock?.enabled !== cur.freeGenerationLock?.enabled}>
+                                            {({ getFieldValue }) => {
+                                                const enabled = getFieldValue(["freeGenerationLock", "enabled"]);
+                                                if (!enabled) return null;
+
+                                                return (
+                                                    <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-800 dark:bg-orange-900/20">
+                                                        <div className="mb-4 rounded-md border border-orange-300 bg-orange-100 p-3 dark:border-orange-700 dark:bg-orange-900/40">
+                                                            <div className="mb-2 text-sm font-medium text-orange-900 dark:text-orange-200">启用后将强制以下限制：</div>
+                                                            <ul className="m-0 list-disc space-y-1 pl-5 text-xs text-orange-800 dark:text-orange-300">
+                                                                <li>单次只能生成 1 张图片（n=1）</li>
+                                                                <li>总像素 ≤ 1024×1024（约 1MP）</li>
+                                                                <li>采样步数 ≤ 28</li>
+                                                                <li>不支持图生图/参考图功能</li>
+                                                            </ul>
+                                                        </div>
+                                                        <Row gutter={12}>
+                                                            <Col span={12}>
+                                                                <Form.Item name={["freeGenerationLock", "maxPixels"]} label="最大总像素">
+                                                                    <InputNumber min={262144} max={4194304} step={65536} className="w-full" />
+                                                                </Form.Item>
+                                                            </Col>
+                                                            <Col span={12}>
+                                                                <Form.Item name={["freeGenerationLock", "maxSteps"]} label="最大步数">
+                                                                    <InputNumber min={1} max={50} className="w-full" />
+                                                                </Form.Item>
+                                                            </Col>
+                                                            <Col span={12}>
+                                                                <Form.Item name={["freeGenerationLock", "forceCountOne"]} valuePropName="checked">
+                                                                    <Checkbox>强制单张生成（n=1）</Checkbox>
+                                                                </Form.Item>
+                                                            </Col>
+                                                            <Col span={12}>
+                                                                <Form.Item name={["freeGenerationLock", "disableImg2Img"]} valuePropName="checked">
+                                                                    <Checkbox>禁用图生图</Checkbox>
+                                                                </Form.Item>
+                                                            </Col>
+                                                        </Row>
+                                                    </div>
+                                                );
+                                            }}
+                                        </Form.Item>
+                                    </Space>
                                 </Form.Item>
                             </Col>
                         </Row>
@@ -910,11 +971,7 @@ function collectChannelModels(channels: AdminModelChannel[]) {
 }
 
 function collectKnownModels(settings: AdminSettings) {
-    return uniqueModels([
-        ...(settings.public.modelChannel.availableModels || []),
-        ...(settings.public.modelChannel.modelCosts || []).map((item) => item.model),
-        ...settings.private.channels.flatMap((channel) => channel.models || []),
-    ]);
+    return uniqueModels([...(settings.public.modelChannel.availableModels || []), ...(settings.public.modelChannel.modelCosts || []).map((item) => item.model), ...settings.private.channels.flatMap((channel) => channel.models || [])]);
 }
 
 function buildModelSelectGroups(sourceModels: string[], existingModels: string[]): Record<ModelSelectTabKey, string[]> {

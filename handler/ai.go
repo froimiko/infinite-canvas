@@ -88,6 +88,19 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "AI 接口请求失败")
 		return
 	}
+
+	// ========== NovelAI 协议分支 ==========
+	if channel.Protocol == "novelai" {
+		// 仅支持图像生成接口
+		if path != "/images/generations" {
+			Fail(w, "NovelAI 协议仅支持 /images/generations 接口")
+			return
+		}
+		proxyNovelAIImageRequest(w, r, body, channel, user, credits)
+		return
+	}
+	// ========== NovelAI 协议分支结束 ==========
+
 	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
 	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
 	if err != nil {
