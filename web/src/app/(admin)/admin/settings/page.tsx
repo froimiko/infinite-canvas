@@ -217,18 +217,18 @@ export default function AdminSettingsPage() {
 
     const fetchChannelModelList = async () => {
         if (!token) return;
-        const channel = channelForm.getFieldsValue();
-        if (!channel?.baseUrl) {
+        const channel = normalizeChannel(channelForm.getFieldsValue());
+        if (!channel.baseUrl && channel.protocol !== "novelai") {
             message.warning("请先填写接口地址");
             return;
         }
-        if (editingChannelIndex === null && !channel?.apiKey) {
+        if (editingChannelIndex === null && !channel.apiKey) {
             message.warning("请先填写 API Key");
             return;
         }
         setIsFetchingChannelModels(true);
         try {
-            const channelModels = await fetchChannelModels(token, { index: editingChannelIndex ?? undefined, channel: normalizeChannel(channel) });
+            const channelModels = await fetchChannelModels(token, { index: editingChannelIndex ?? undefined, channel });
             const current = isModelSelectorOpen ? uniqueModels(modelSelectSelected) : uniqueModels(channelForm.getFieldValue("models") || []);
             rememberModels(channelModels);
             if (!channelModels.length) {
@@ -664,8 +664,17 @@ export default function AdminSettingsPage() {
                                 </Form.Item>
                             </Col>
                             <Col span={24}>
-                                <Form.Item name="baseUrl" label="接口地址" rules={[{ required: true, message: "请输入接口地址" }]}>
-                                    <Input />
+                                <Form.Item
+                                    name="baseUrl"
+                                    label="接口地址"
+                                    dependencies={["protocol"]}
+                                    rules={[
+                                        {
+                                            validator: (_, value) => (channelForm.getFieldValue("protocol") === "novelai" || value ? Promise.resolve() : Promise.reject(new Error("请输入接口地址"))),
+                                        },
+                                    ]}
+                                >
+                                    <Input placeholder="NovelAI 可留空，默认使用 https://image.novelai.net" />
                                 </Form.Item>
                             </Col>
                             <Col span={24}>
@@ -937,7 +946,7 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
 
 function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChannel {
     return {
-        protocol: "openai",
+        protocol: item.protocol || "openai",
         name: item.name || "",
         baseUrl: item.baseUrl || "",
         apiKey: item.apiKey || "",
@@ -945,6 +954,7 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
         weight: Math.max(1, Number(item.weight) || 1),
         enabled: item.enabled !== false,
         remark: item.remark || "",
+        freeGenerationLock: item.freeGenerationLock,
     };
 }
 

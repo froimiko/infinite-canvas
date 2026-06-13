@@ -288,7 +288,7 @@ func isVideoModelName(modelName string) bool {
 
 func isImageModelName(modelName string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	return strings.Contains(name, "seedream") || strings.Contains(name, "gpt-image") || strings.Contains(name, "image")
+	return strings.Contains(name, "seedream") || strings.Contains(name, "gpt-image") || strings.Contains(name, "image") || strings.Contains(name, "diffusion") || strings.Contains(name, "nai-") || strings.Contains(name, "novelai")
 }
 
 func isTextModelName(modelName string) bool {
@@ -333,7 +333,7 @@ func resolveAdminChannel(index *int, channel model.ModelChannel) (model.ModelCha
 			}
 		}
 	}
-	if strings.TrimSpace(resolved.BaseURL) == "" {
+	if strings.TrimSpace(resolved.BaseURL) == "" && resolved.Protocol != "novelai" {
 		return model.ModelChannel{}, safeMessageError{message: "缺少接口地址"}
 	}
 	if strings.TrimSpace(resolved.APIKey) == "" {
@@ -343,6 +343,10 @@ func resolveAdminChannel(index *int, channel model.ModelChannel) (model.ModelCha
 }
 
 func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
+	if channel.Protocol == "novelai" {
+		return novelAIImageModels(), nil
+	}
+
 	request, err := http.NewRequest(http.MethodGet, BuildModelChannelURL(channel, "/models"), nil)
 	if err != nil {
 		return nil, err
@@ -474,15 +478,66 @@ func (err safeMessageError) SafeMessage() string {
 func modelChannelsForModel(channels []model.ModelChannel, modelName string) []model.ModelChannel {
 	result := []model.ModelChannel{}
 	for _, channel := range channels {
-		if !channel.Enabled || channel.BaseURL == "" || channel.APIKey == "" {
+		if !channel.Enabled || channel.APIKey == "" || (channel.BaseURL == "" && channel.Protocol != "novelai") {
 			continue
 		}
 		for _, item := range channel.Models {
-			if strings.TrimSpace(item) == modelName {
+			if modelChannelNameMatches(channel.Protocol, item, modelName) {
 				result = append(result, channel)
 				break
 			}
 		}
 	}
 	return result
+}
+
+func modelChannelNameMatches(protocol, configured, requested string) bool {
+	configured = strings.TrimSpace(configured)
+	requested = strings.TrimSpace(requested)
+	if configured == requested {
+		return true
+	}
+	if protocol != "novelai" {
+		return false
+	}
+	return normalizeNovelAIModelName(configured) == normalizeNovelAIModelName(requested)
+}
+
+func normalizeNovelAIModelName(modelName string) string {
+	value := strings.ToLower(strings.TrimSpace(modelName))
+	value = strings.ReplaceAll(value, "_", "-")
+	if strings.Contains(value, "4.5") || strings.Contains(value, "v4.5") || strings.Contains(value, "4-5") {
+		if strings.Contains(value, "curated") {
+			return "nai-diffusion-4-5-curated"
+		}
+		return "nai-diffusion-4-5-full"
+	}
+	if strings.Contains(value, "nai-diffusion-4") || strings.Contains(value, "v4") {
+		if strings.Contains(value, "full") {
+			return "nai-diffusion-4-full"
+		}
+		return "nai-diffusion-4-curated"
+	}
+	if strings.Contains(value, "nai-diffusion-3") || strings.Contains(value, "v3") {
+		return "nai-diffusion-3"
+	}
+	if strings.Contains(value, "nai-diffusion-2") || strings.Contains(value, "v2") {
+		return "nai-diffusion-2"
+	}
+	if strings.Contains(value, "furry") {
+		return "nai-diffusion-furry"
+	}
+	return value
+}
+
+func novelAIImageModels() []string {
+	return []string{
+		"NAI Diffusion V4.5 Full",
+		"NAI Diffusion V4.5 Curated",
+		"NAI Diffusion V4 Full",
+		"NAI Diffusion V4 Curated",
+		"NAI Diffusion V3",
+		"NAI Diffusion V2",
+		"NAI Diffusion Furry",
+	}
 }

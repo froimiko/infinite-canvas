@@ -56,7 +56,6 @@ type novelAIParameters struct {
 	ControlnetStrength           float64 `json:"controlnet_strength"`
 	Legacy                       bool    `json:"legacy"`
 	AddOriginalImage             bool    `json:"add_original_image"`
-	UncondScale                  float64 `json:"uncond_scale"`
 	DeliberateEulerAncestralBug  bool    `json:"deliberate_euler_ancestral_bug"`
 	PreferBrownian               bool    `json:"prefer_brownian"`
 	
@@ -149,7 +148,7 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			Scale:          scale,
 			Sampler:        "k_euler_ancestral",
 			Steps:          steps,
-			NSamples:       1, // 强制单张
+			NSamples:       normalizeOpenAIImageCount(openAI.N),
 			Seed:           0, // 随机种子
 			NegativePrompt: negativePrompt,
 
@@ -159,7 +158,7 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			SkipCfgAboveSigma: nil,  // Variety Off
 			CfgRescale:        0.0,
 
-			// 固定参数（官方文档推荐值）
+			// 固定参数（NovelAI RequestParameters 支持字段）
 			NoiseSchedule:               "karras",
 			SM:                          false,
 			SMDyn:                       false,
@@ -167,7 +166,6 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			ControlnetStrength:          1.0,
 			Legacy:                      false,
 			AddOriginalImage:            true,
-			UncondScale:                 1.0,
 			DeliberateEulerAncestralBug: false,
 			PreferBrownian:              true,
 		},
