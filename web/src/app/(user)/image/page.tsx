@@ -161,9 +161,14 @@ export default function ImagePage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
-
-        const result = await Promise.allSettled(tasks);
+        const result: PromiseSettledResult<GeneratedImage>[] = [];
+        for (let index = 0; index < generationCount; index++) {
+            try {
+                result.push({ status: "fulfilled", value: await runGenerationSlot(index, snapshot) });
+            } catch (reason) {
+                result.push({ status: "rejected", reason });
+            }
+        }
         const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
