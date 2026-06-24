@@ -32,47 +32,47 @@
 
 完整功能说明见 [功能介绍](docs/content/docs/overview/features.mdx)。
 
-如果你在为担心没有合适的生图API来发愁，可以查看该免费生图项目：[chatgpt2api](https://github.com/basketikun/chatgpt2api)
+如果你在为担心没有合适的生图 API 来发愁，可以查看该免费生图项目：[chatgpt2api](https://github.com/basketikun/chatgpt2api)
 
 ## 技术栈
 
 - 前端：Next.js、React、TypeScript、Tailwind CSS、Ant Design、Zustand、TanStack Query。
-- 少量 Next.js Route：第三方提示词内存缓存、WebDAV 可选代理。
-- 部署：Vercel 或 Docker。
+- 后端：Go、Gin、GORM。
+- 部署：Docker。
 
 ## 快速开始
 
-推荐直接导入仓库到 Vercel，根目录已提供 `vercel.json`，会构建 `web/`。AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器本地。
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/basketikun/infinite-canvas)
 
 ```bash
 git clone git@github.com:basketikun/infinite-canvas.git
 cd infinite-canvas
-cd web
-bun install
-bun run dev
+cp .env.example .env
+# 修改默认账号密码等信息
+docker-compose up -d
 ```
 
-Docker 运行：
+本地源码构建运行：
 
 ```bash
-docker build -t infinite-canvas .
-docker run --rm -p 3000:3000 infinite-canvas
+cp .env.example .env
+docker compose -f docker-compose.local.yml up -d --build
 ```
 
-运行后默认端口3000，可访问 `http://localhost:3000`。
+运行后默认端口 3000，可访问 `http://localhost:3000`。
 
-首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
+如需要拉取提示词，可前往:`http://localhost:3000/admin/prompts`
 
 ## New API 自动配置
 
 如果使用 New API，可在 `系统设置 -> 聊天方式 -> 添加聊天设置` 中填入：
 
 ```text
-https://canvas.best?apiKey={key}&baseUrl={address}
+https://infinite-canvas-cpco.onrender.com?apiKey={key}&baseUrl={address}
 ```
 
 跳转后会自动打开配置弹窗并填入 API Key 和 Base URL。
-如果自己部署了，可以把 `https://canvas.best` 替换成你部署的地址。
+如果自己部署了，可以把 `https://infinite-canvas-cpco.onrender.com` 替换成你部署的地址。
 
 ## 效果展示
 
@@ -130,7 +130,7 @@ https://canvas.best?apiKey={key}&baseUrl={address}
 
 学 AI，上 L 站：[LinuxDO](https://linux.do/)
 
-点击链接加入群聊【AI开源交流】：https://qm.qq.com/q/DFnKzZ807u
+点击链接加入群聊【AI 开源交流】：https://qm.qq.com/q/DFnKzZ807u
 
 ## 开源协议
 
