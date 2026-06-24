@@ -2474,8 +2474,6 @@ function InfiniteCanvasPage() {
                     return;
                 }
 
-                const image = useReferenceImages;
-
                 const image = useReferenceImages
                     ? await requestEdit(generationConfig, prompt, retryImages, undefined, { ...requestOptions, signal: controller.signal }).then((items) => items[0])
                     : await requestGeneration(generationConfig, prompt, { ...requestOptions, signal: controller.signal }).then((items) => items[0]);
