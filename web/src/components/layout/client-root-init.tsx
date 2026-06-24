@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { App } from "antd";
 
-import { useConfigStore } from "@/stores/use-config-store";
+import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
@@ -16,6 +16,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const loadPublicSettings = useConfigStore((state) => state.loadPublicSettings);
     const publicSettings = useConfigStore((state) => state.publicSettings);
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const config = useConfigStore((state) => state.config);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const isLoginPage = pathname === "/login" || pathname === "/admin/login";
 
@@ -46,10 +47,26 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             return;
         }
         updateConfig("channelMode", "local");
+        const firstChannel = config.channels[0];
+        updateConfig(
+            "channels",
+            firstChannel
+                ? config.channels.map((channel, index) =>
+                      index === 0
+                          ? {
+                                ...channel,
+                                ...(baseUrl ? { baseUrl } : {}),
+                                ...(apiKey ? { apiKey } : {}),
+                            }
+                          : channel,
+                  )
+                : [createModelChannel({ id: "default", name: "默认渠道", baseUrl: baseUrl || undefined, apiKey: apiKey || "" })],
+        );
         if (baseUrl) updateConfig("baseUrl", baseUrl);
         if (apiKey) updateConfig("apiKey", apiKey);
         openConfigDialog(false);
-    }, [message, openConfigDialog, publicSettings, updateConfig]);
+        message.success("已导入本地直连配置");
+    }, [config.channels, message, openConfigDialog, publicSettings, updateConfig]);
 
     return <>{children}</>;
 }
