@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { ArrowUp, ChevronDown, LoaderCircle, Square } from "lucide-react";
-import { Button, Input } from "antd";
+import { Button } from "antd";
 
+import { TagAutocomplete } from "@/components/tag-autocomplete";
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { normalizeNovelAISettings } from "@/lib/novelai-config";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
@@ -78,6 +80,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 references={mentionReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
+                enableTagAutocomplete={mode === "image"}
                 className="thin-scrollbar h-24 w-full resize-none rounded-xl border px-3 py-2 text-sm leading-5 outline-none"
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
@@ -93,7 +96,16 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </span>
                     </button>
                     {negativePromptOpen ? (
-                        <Input.TextArea value={node.metadata?.negativePrompt || ""} onChange={(event) => updateNegativePrompt(event.target.value)} rows={2} className="!mt-1.5 !resize-none !text-xs" placeholder="留空使用默认负面提示词" />
+                        <TagAutocomplete
+                            value={node.metadata?.negativePrompt || ""}
+                            onChange={updateNegativePrompt}
+                            inputType="textarea"
+                            rows={2}
+                            autoResize={false}
+                            className="thin-scrollbar mt-1.5 w-full resize-none rounded-lg border px-2 py-1.5 text-xs outline-none"
+                            style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }}
+                            placeholder="留空使用默认负面提示词"
+                        />
                     ) : null}
                 </div>
             ) : null}
@@ -108,7 +120,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 config={config}
                                 placement="topLeft"
                                 buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
-                                onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
+                                onConfigChange={(key, value) => onConfigChange(node.id, imageConfigPatch(key, value))}
                                 onMissingConfig={() => openConfigDialog(true)}
                                 onOpenChange={onImageSettingsOpenChange}
                             />
@@ -178,6 +190,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,
         count: String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
+        ...normalizeNovelAISettings({ ...globalConfig, ...node.metadata }),
     };
 }
 
@@ -186,6 +199,11 @@ function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: bool
     if (mode === "audio") return "描述要生成的音频内容";
     if (mode === "image") return hasImageContent ? "请输入你想要把这张图修改成什么" : "描述要生成的图片内容";
     return hasTextContent ? "请输入你想要将本段文本修改成什么" : "请输入你想要生成的文本内容";
+}
+
+function imageConfigPatch<K extends keyof AiConfig>(key: K, value: AiConfig[K]) {
+    if (key === "count") return { count: Number(value) || 1 };
+    return { [key]: value };
 }
 
 function videoConfigPatch(key: keyof AiConfig, value: string) {

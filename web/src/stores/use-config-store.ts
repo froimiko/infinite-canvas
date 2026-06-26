@@ -5,8 +5,10 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
+import { DEFAULT_NOVELAI_SETTINGS } from "@/components/novelai/novelai-constants";
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
+import type { NovelAISettings } from "@/types/image";
 
 export type ApiCallFormat = "openai" | "gemini";
 
@@ -19,7 +21,7 @@ export type ModelChannel = {
     models: string[];
 };
 
-export type AiConfig = {
+export type AiConfig = NovelAISettings & {
     channelMode: "remote" | "local";
     baseUrl: string;
     apiKey: string;
@@ -103,6 +105,7 @@ export const defaultConfig: AiConfig = {
     size: "1:1",
     count: "1",
     canvasImageCount: "3",
+    ...DEFAULT_NOVELAI_SETTINGS,
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -235,10 +238,11 @@ export const useConfigStore = create<ConfigStore>()(
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
-                const config = { ...defaultConfig, ...persistedConfig };
+                const config = { ...defaultConfig, ...DEFAULT_NOVELAI_SETTINGS, ...persistedConfig };
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
                 const models = modelOptionsFromChannels(channels);
+
                 return {
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },

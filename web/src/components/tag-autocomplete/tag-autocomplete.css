@@ -1,0 +1,91 @@
+.tag-autocomplete-container {
+    position: relative;
+    width: 100%;
+}
+
+.tag-autocomplete-input-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.tag-suggestions-dropdown {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 1600;
+    margin-top: 4px;
+    max-height: 280px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 12px;
+    background: rgba(24, 24, 27, 0.98);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(10px);
+    scrollbar-width: thin;
+}
+
+.tag-suggestion-item {
+    display: flex;
+    width: 100%;
+    cursor: pointer;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    padding: 9px 10px;
+    color: #f8fafc;
+    text-align: left;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.tag-suggestion-item:hover,
+.tag-suggestion-item.selected {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.tag-category-dot {
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+    border-radius: 999px;
+}
+
+.tag-info {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.tag-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.tag-zh,
+.tag-count {
+    color: rgba(226, 232, 240, 0.62);
+    font-size: 11px;
+}
+
+.tag-count {
+    flex-shrink: 0;
+}
+
+.tag-suggestions-loading,
+.tag-suggestions-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    color: rgba(226, 232, 240, 0.62);
+    font-size: 13px;
+}

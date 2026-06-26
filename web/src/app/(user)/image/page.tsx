@@ -2,16 +2,18 @@
 
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
+import { App, Button, Checkbox, Drawer, Empty, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { TagAutocomplete } from "@/components/tag-autocomplete";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
+import { normalizeNovelAISettings } from "@/lib/novelai-config";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
@@ -19,7 +21,7 @@ import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
-import type { ReferenceImage } from "@/types/image";
+import type { NovelAISettings, ReferenceImage } from "@/types/image";
 
 type GeneratedImage = {
     id: string;
@@ -60,9 +62,29 @@ type GenerationLog = {
     thumbnails: string[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count"> & NovelAISettings;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+
+const NOVELAI_CONFIG_KEYS = [
+    "novelAIEnabled",
+    "novelAIModel",
+    "novelAISampler",
+    "novelAISteps",
+    "novelAICfgScale",
+    "novelAISeed",
+    "novelAIUcPreset",
+    "novelAICfgRescale",
+    "novelAINoiseSchedule",
+    "novelAISm",
+    "novelAISmDyn",
+    "novelAIDynamicThresholding",
+    "novelAIVarietyPlus",
+    "novelAIAqtPreset",
+    "novelAIDivideRoles",
+    "novelAIUseAutoPositioning",
+    "novelAICharacterPrompts",
+] as const satisfies ReadonlyArray<keyof NovelAISettings>;
 
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
@@ -275,6 +297,7 @@ export default function ImagePage() {
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
+        NOVELAI_CONFIG_KEYS.forEach((key) => updateConfig(key, log.config[key]));
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     };
 
@@ -363,7 +386,13 @@ export default function ImagePage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder="描述画面主体、风格、构图、光线和用途" />
+                                <TagAutocomplete
+                                    value={prompt}
+                                    onChange={setPrompt}
+                                    rows={7}
+                                    className="w-full resize-none rounded-md border border-stone-300 bg-transparent px-3 py-2 outline-none transition focus:border-blue-500 dark:border-stone-700"
+                                    placeholder="描述画面主体、风格、构图、光线和用途"
+                                />
                             </div>
 
                             <div>
@@ -371,7 +400,13 @@ export default function ImagePage() {
                                     <span className="text-base font-semibold">负面提示词（NAI）</span>
                                     <span className="text-xs text-stone-500 dark:text-stone-400">留空使用默认</span>
                                 </div>
-                                <Input.TextArea value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} rows={3} placeholder="例如：lowres, bad anatomy, blurry" />
+                                <TagAutocomplete
+                                    value={negativePrompt}
+                                    onChange={setNegativePrompt}
+                                    rows={3}
+                                    className="w-full resize-none rounded-md border border-stone-300 bg-transparent px-3 py-2 outline-none transition focus:border-blue-500 dark:border-stone-700"
+                                    placeholder="例如：lowres, bad anatomy, blurry"
+                                />
                             </div>
 
                             <div className="min-w-0">
@@ -773,6 +808,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         quality: log.config?.quality || log.quality || "",
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
+        ...normalizeNovelAISettings(log.config || {}),
     };
 }
 
@@ -817,12 +853,13 @@ function buildLog({
     status: GenerationLog["status"];
     images: GeneratedImage[];
 }): GenerationLog {
-    const logConfig = {
+    const logConfig: GenerationLogConfig = {
         model: config.model,
         imageModel: config.imageModel,
         quality: config.quality,
         size: config.size,
         count: config.count,
+        ...normalizeNovelAISettings(config),
     };
     return {
         id: nanoid(),

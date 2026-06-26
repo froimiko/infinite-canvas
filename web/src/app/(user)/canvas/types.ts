@@ -1,3 +1,5 @@
+import type { NovelAISettings } from "@/types/image";
+
 export type Position = {
     x: number;
     y: number;
@@ -21,7 +23,7 @@ export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 
-export type CanvasNodeMetadata = {
+export type CanvasNodeMetadata = Partial<NovelAISettings> & {
     content?: string;
     composerContent?: string;
     prompt?: string;

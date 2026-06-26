@@ -3,6 +3,7 @@
 import { type ReactNode, useState } from "react";
 import { ConfigProvider, Switch } from "antd";
 
+import { NovelAISettingsPanel } from "@/components/novelai/novelai-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -32,7 +33,7 @@ const aspectOptions = [
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "size" | "count", value: string) => void;
+    onConfigChange: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -65,8 +66,8 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 style={{ color: theme.node.text }}
                 onMouseDown={(event) => {
                     event.stopPropagation();
-                    if (event.target instanceof HTMLInputElement) return;
-                    if (document.activeElement instanceof HTMLInputElement && event.currentTarget.contains(document.activeElement)) document.activeElement.blur();
+                    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+                    if ((document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) && event.currentTarget.contains(document.activeElement)) document.activeElement.blur();
                 }}
             >
                 {showTitle ? <div className="text-lg font-semibold">图像设置</div> : null}
@@ -127,6 +128,17 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
                     </div>
                 </div>
+                <details className="group rounded-2xl border p-3" style={{ borderColor: theme.node.stroke }} defaultOpen={config.novelAIEnabled}>
+                    <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold">
+                        <span>NovelAI 高级参数</span>
+                        <span className="text-xs font-normal" style={{ color: theme.node.muted }}>
+                            {config.novelAIEnabled ? "已启用" : "可选"}
+                        </span>
+                    </summary>
+                    <div className="mt-3">
+                        <NovelAISettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} />
+                    </div>
+                </details>
             </div>
         </ImageSettingsTheme>
     );

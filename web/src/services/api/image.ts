@@ -5,6 +5,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
+import { buildNovelAIRequestParameters } from "@/lib/novelai-config";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 
@@ -270,6 +271,13 @@ function withSystemMessage<T extends ResponseInputMessage>(config: AiConfig, mes
 
 function normalizedNegativePrompt(options?: RequestOptions) {
     return options?.negativePrompt?.trim() || "";
+}
+
+function appendFormDataParameters(formData: FormData, params: Record<string, unknown>) {
+    Object.entries(params).forEach(([key, value]) => {
+        if (value === undefined || value === null) return;
+        formData.set(key, Array.isArray(value) || isRecord(value) ? JSON.stringify(value) : String(value));
+    });
 }
 
 function toResponseInput(messages: ResponseInputMessage[]): ResponseInputItem[] {
@@ -629,6 +637,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 ...(requestSize ? { size: requestSize } : {}),
                 response_format: "b64_json",
                 output_format: IMAGE_OUTPUT_FORMAT,
+                ...buildNovelAIRequestParameters(config),
             },
             {
                 headers: aiHeaders(requestConfig, "application/json"),
@@ -670,6 +679,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (requestSize) {
         formData.set("size", requestSize);
     }
+    appendFormDataParameters(formData, buildNovelAIRequestParameters(config));
     const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
     files.forEach((file) => formData.append("image", file));
     if (mask) formData.set("mask", dataUrlToFile(mask));

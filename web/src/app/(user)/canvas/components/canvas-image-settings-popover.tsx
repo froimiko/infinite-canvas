@@ -7,12 +7,15 @@ import { Button } from "antd";
 
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { normalizeNovelAISettings } from "@/lib/novelai-config";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 
+type ImageConfigChange = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+
 type CanvasImageSettingsPopoverProps = {
     config: AiConfig;
-    onConfigChange: (key: keyof AiConfig, value: string) => void;
+    onConfigChange: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     onMissingConfig?: () => void;
     onOpenChange?: (open: boolean) => void;
     buttonClassName?: string;
@@ -30,6 +33,8 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
+    const novelAISettings = normalizeNovelAISettings(config);
+    const summary = novelAISettings.novelAIEnabled ? `NovelAI · ${novelAISettings.novelAISampler} · ${novelAISettings.novelAISteps} steps` : `${imageQualityLabel(quality)} · ${imageSizeLabel(activeSize)} · ${count} 张`;
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
         onOpenChange?.(nextOpen);
@@ -63,10 +68,15 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     return (
         <>
             <span ref={buttonRef} className="inline-flex min-w-0">
-                <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => updateOpen(!open)}>
-                    <span className="truncate">
-                        {imageQualityLabel(quality)} · {imageSizeLabel(activeSize)} · {count} 张
-                    </span>
+                <Button
+                    size="small"
+                    type="text"
+                    className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-2.5"}
+                    style={{ background: theme.node.fill, color: theme.node.text }}
+                    icon={<Settings2 className="size-3.5" />}
+                    onClick={() => updateOpen(!open)}
+                >
+                    <span className="truncate">{summary}</span>
                 </Button>
             </span>
             {panel}
@@ -87,9 +97,9 @@ function ImageSettingsPortal({
     placement: CanvasImageSettingsPopoverProps["placement"];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
-    onConfigChange: (key: keyof AiConfig, value: string) => void;
+    onConfigChange: ImageConfigChange;
 }) {
-    const width = 356;
+    const width = 480;
     const gap = 8;
     const margin = 12;
     const alignRight = placement?.endsWith("Right");
@@ -111,14 +121,7 @@ function ImageSettingsPortal({
     } as const;
 
     return createPortal(
-        <div
-            ref={panelRef}
-            className="canvas-image-settings-popover"
-            style={style}
-            onPointerDown={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-        >
+        <div ref={panelRef} className="canvas-image-settings-popover" style={style} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
             <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
         </div>,
         document.body,

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.6.0 - 2026-06-26
+
+- [新增] 补全 NovelAI 高级生图参数：模型、采样器、尺寸、步数、CFG、seed、UC Preset、noise schedule、AQT、Variety+ 与 V4 角色提示词。
+- [新增] 生图工作台与画布提示词输入支持 NovelAI tag 自动补全，画布场景保留资源 `@mention` 优先交互。
+- [新增] 画布新增 NovelAI 专属设置控件，支持保存/恢复节点 metadata，并在重试生成时复用原 NovelAI 参数。
+- [调整] Go 后端 NovelAI adapter 支持 OpenAI-compatible 请求透传 NovelAI 参数，并保持未启用 NovelAI 扩展时的旧请求兼容。
+- [修复] 修复 NovelAI V3 请求误带 V4-only AQT 字段的风险，并补强 seed、角色坐标与免费生图锁 steps 校验。
+
 ## v0.5.0 - 2026-06-25
 
 - [新增] 合并上游 v0.4.0 全部能力：网页版 Agent Loop、canvas-agent、渠道兼容 Gemini 格式、Codex App 插件支持。
