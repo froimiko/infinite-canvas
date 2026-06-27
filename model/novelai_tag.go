@@ -49,16 +49,46 @@ type PromptTagPackage struct {
 	Error       string               `json:"error,omitempty"`
 }
 
+// PromptTagGroup 对应 WeiLin tag_groups 一级分组表。
+type PromptTagGroup struct {
+	IDIndex    int64  `json:"idIndex" gorm:"column:id_index;primaryKey;autoIncrement"`
+	Name       string `json:"name" gorm:"column:name;index:idx_tag_groups_name"`
+	Color      string `json:"color" gorm:"column:color"`
+	CreateTime int64  `json:"createTime" gorm:"column:create_time;index:idx_tag_groups_create_time"`
+	PUUID      string `json:"pUuid" gorm:"column:p_uuid;size:128;index"`
+}
+
+func (PromptTagGroup) TableName() string {
+	return "tag_groups"
+}
+
+// PromptTagSubgroup 对应 WeiLin tag_subgroups 二级分组表。
+type PromptTagSubgroup struct {
+	IDIndex    int64  `json:"idIndex" gorm:"column:id_index;primaryKey;autoIncrement"`
+	GroupID    int64  `json:"groupId" gorm:"column:group_id;index"`
+	Name       string `json:"name" gorm:"column:name;index:idx_tag_subgroups_name"`
+	Color      string `json:"color" gorm:"column:color"`
+	CreateTime int64  `json:"createTime" gorm:"column:create_time;index:idx_tag_subgroups_create_time"`
+	PUUID      string `json:"pUuid" gorm:"column:p_uuid;size:128;index"`
+	GUUID      string `json:"gUuid" gorm:"column:g_uuid;size:128;index"`
+}
+
+func (PromptTagSubgroup) TableName() string {
+	return "tag_subgroups"
+}
+
 // PromptTagTag 对应 WeiLin tag_tags 表。
 type PromptTagTag struct {
-	IDIndex    int64  `json:"idIndex" gorm:"column:id_index;primaryKey;autoIncrement"`
-	SubgroupID int64  `json:"subgroupId" gorm:"column:subgroup_id;index"`
-	Text       string `json:"text" gorm:"column:text;index:idx_tag_tags_text"`
-	Desc       string `json:"desc" gorm:"column:desc;index:idx_tag_tags_desc"`
-	Color      string `json:"color" gorm:"column:color"`
-	CreateTime int64  `json:"createTime" gorm:"column:create_time;index:idx_tag_tags_create_time"`
-	TUUID      string `json:"tUuid" gorm:"column:t_uuid;size:128;index"`
-	GUUID      string `json:"gUuid" gorm:"column:g_uuid;size:128;index"`
+	IDIndex     int64  `json:"idIndex" gorm:"column:id_index;primaryKey;autoIncrement"`
+	SubgroupID  int64  `json:"subgroupId" gorm:"column:subgroup_id;index"`
+	Text        string `json:"text" gorm:"column:text;index:idx_tag_tags_text"`
+	Desc        string `json:"desc" gorm:"column:desc;index:idx_tag_tags_desc"`
+	Color       string `json:"color" gorm:"column:color"`
+	CreateTime  int64  `json:"createTime" gorm:"column:create_time;index:idx_tag_tags_create_time"`
+	TUUID       string `json:"tUuid" gorm:"column:t_uuid;size:128;index"`
+	GUUID       string `json:"gUuid" gorm:"column:g_uuid;size:128;index"`
+	ImagePath   string `json:"imagePath" gorm:"column:image_path"`
+	ImageStatus int64  `json:"imageStatus" gorm:"column:image_status;default:0"`
 }
 
 func (PromptTagTag) TableName() string {

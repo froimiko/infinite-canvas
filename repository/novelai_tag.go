@@ -13,7 +13,13 @@ const defaultPromptTagSearchLimit = 20
 // ensurePromptTagSchema relies on GORM AutoMigrate/index tags for cross-dialect indexes.
 // It intentionally does not download or execute remote SQL; installation is handled by admin-only install APIs.
 func ensurePromptTagSchema(db *gorm.DB) error {
-	return nil
+	return db.AutoMigrate(
+		&model.PromptTagGroup{},
+		&model.PromptTagSubgroup{},
+		&model.PromptTagTag{},
+		&model.PromptDanbooruTag{},
+		&model.PromptTagInstalledPackage{},
+	)
 }
 
 // PromptTagDatabaseStatus returns local database counts and installed package records.

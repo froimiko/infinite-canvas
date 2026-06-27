@@ -141,7 +141,7 @@ func InstallPromptTagDatabasePackages(request PromptTagInstallRequest) (PromptTa
 			continue
 		}
 		packageType := promptTagPackageTypeFromPath(packagePath)
-		if installed, installedPackage := promptTagInstalledPackage(packagePath); installed {
+		if installed, installedPackage := promptTagInstalledPackage(packagePath); installed && strings.TrimSpace(installedPackage.Error) == "" {
 			result.Skipped = append(result.Skipped, installedPackage)
 			continue
 		}

@@ -69,6 +69,8 @@ func DB() (*gorm.DB, error) {
 			&model.Prompt{},
 			&model.Asset{},
 			&model.Setting{},
+			&model.PromptTagGroup{},
+			&model.PromptTagSubgroup{},
 			&model.PromptTagTag{},
 			&model.PromptDanbooruTag{},
 			&model.PromptTagInstalledPackage{},
