@@ -200,11 +200,65 @@ export type AdminPublicSettings = {
     };
 };
 
+export type AdminPromptTagPackageType = "tags" | "danbooru";
+
+export type AdminPromptTagPackage = {
+    type: AdminPromptTagPackageType;
+    kind?: "file" | "dir" | string;
+    path: string;
+    name: string;
+    sha?: string;
+    size?: number;
+    downloadUrl?: string;
+    installed?: boolean;
+    installedAt?: string;
+    error?: string;
+};
+
+export type AdminPromptTagInstalledPackage = {
+    path: string;
+    type: AdminPromptTagPackageType;
+    sourceOwner: string;
+    sourceRepo: string;
+    branch: string;
+    sha: string;
+    size: number;
+    installedAt: string;
+    updatedAt: string;
+    error: string;
+};
+
+export type AdminPromptTagDatabaseStatus = {
+    enabled: boolean;
+    owner: string;
+    repo: string;
+    branch: string;
+    tagCount: number;
+    danbooruTagCount: number;
+    installedPackages: AdminPromptTagInstalledPackage[];
+    lastInstalledAt?: string;
+    lastError?: string;
+};
+
+export type AdminPromptTagInstallResult = {
+    installed: AdminPromptTagInstalledPackage[];
+    skipped: AdminPromptTagInstalledPackage[];
+    failed: AdminPromptTagInstalledPackage[];
+    status: AdminPromptTagDatabaseStatus;
+};
+
 export type AdminPrivateSettings = {
     channels: AdminModelChannel[];
     promptSync: {
         enabled: boolean;
         cron: string;
+    };
+    promptTagDatabase: {
+        enabled: boolean;
+        owner: string;
+        repo: string;
+        branch: string;
+        packages: AdminPromptTagPackage[];
     };
     auth: {
         linuxDo: {
@@ -236,7 +290,22 @@ export type AdminChannelActionRequest = {
 export async function fetchChannelModels(token: string, payload: AdminChannelActionRequest) {
     return apiPost<string[]>("/api/admin/settings/channel-models", payload, token);
 }
-
 export async function testChannelModel(token: string, payload: AdminChannelActionRequest) {
     return apiPost<string>("/api/admin/settings/channel-test", payload, token);
+}
+
+export async function fetchPromptTagDatabaseStatus(token: string) {
+    return apiGet<AdminPromptTagDatabaseStatus>("/api/admin/prompt-tag-database/status", undefined, token);
+}
+
+export async function fetchPromptTagDatabaseMainTree(token: string) {
+    return apiGet<AdminPromptTagPackage[]>("/api/admin/prompt-tag-database/tree/main", undefined, token);
+}
+
+export async function fetchPromptTagDatabaseTree(token: string, path: string) {
+    return apiPost<AdminPromptTagPackage[]>("/api/admin/prompt-tag-database/tree", { path }, token);
+}
+
+export async function installPromptTagDatabasePackages(token: string, payload: { type: AdminPromptTagPackageType; paths: string[] }) {
+    return apiPost<AdminPromptTagInstallResult>("/api/admin/prompt-tag-database/install", payload, token);
 }

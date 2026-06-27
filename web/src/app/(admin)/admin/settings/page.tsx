@@ -1,13 +1,29 @@
 "use client";
 
-import { CheckCircleOutlined, DeleteOutlined, FormatPainterOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, DeleteOutlined, FileTextOutlined, FolderOutlined, FormatPainterOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { json } from "@codemirror/lang-json";
 import { App, Button, Card, Checkbox, Col, Drawer, Flex, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { EditorView } from "@uiw/react-codemirror";
 
-import { fetchAdminSettings, fetchChannelModels, saveAdminSettings, testChannelModel, type AdminModelChannel, type AdminModelCost, type AdminSettings } from "@/services/api/admin";
+import {
+    fetchAdminSettings,
+    fetchChannelModels,
+    fetchPromptTagDatabaseMainTree,
+    fetchPromptTagDatabaseStatus,
+    fetchPromptTagDatabaseTree,
+    installPromptTagDatabasePackages,
+    saveAdminSettings,
+    testChannelModel,
+    type AdminModelChannel,
+    type AdminModelCost,
+    type AdminPromptTagDatabaseStatus,
+    type AdminPromptTagInstallResult,
+    type AdminPromptTagPackage,
+    type AdminPromptTagPackageType,
+    type AdminSettings,
+} from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
 
 const CodeMirror = dynamic(() => import("@uiw/react-codemirror"), { ssr: false });
@@ -38,7 +54,12 @@ const emptySettings: AdminSettings = {
         },
         auth: { allowRegister: true, linuxDo: { enabled: false } },
     },
-    private: { channels: [], promptSync: { enabled: true, cron: "*/5 * * * *" }, auth: { linuxDo: { clientId: "", clientSecret: "" } } },
+    private: {
+        channels: [],
+        promptSync: { enabled: true, cron: "*/5 * * * *" },
+        promptTagDatabase: { enabled: true, owner: "weilin9999", repo: "WeiLin-Comfyui-Tools-Prompt", branch: "master", packages: [] },
+        auth: { linuxDo: { clientId: "", clientSecret: "" } },
+    },
 };
 const emptyChannel: AdminModelChannel = {
     protocol: "openai",
@@ -90,7 +111,21 @@ export default function AdminSettingsPage() {
     const [isSaving, setIsSaving] = useState(false);
     const [modelCosts, setModelCosts] = useState<AdminModelCost[]>([]);
     const [knownModels, setKnownModels] = useState<string[]>([]);
+    const [promptTagStatus, setPromptTagStatus] = useState<AdminPromptTagDatabaseStatus | null>(null);
+    const [promptTagTree, setPromptTagTree] = useState<AdminPromptTagPackage[]>([]);
+    const [promptTagCurrentPath, setPromptTagCurrentPath] = useState("");
+    const [selectedPromptTagPaths, setSelectedPromptTagPaths] = useState<string[]>([]);
+    const [isPromptTagStatusLoading, setIsPromptTagStatusLoading] = useState(false);
+    const [isPromptTagTreeLoading, setIsPromptTagTreeLoading] = useState(false);
+    const [isPromptTagInstalling, setIsPromptTagInstalling] = useState(false);
+    const [promptTagInstallResult, setPromptTagInstallResult] = useState<AdminPromptTagInstallResult | null>(null);
     const publicModels = Form.useWatch(["public", "modelChannel", "availableModels"], form) || [];
+    const promptTagSetting = Form.useWatch(["private", "promptTagDatabase"], form) || emptySettings.private.promptTagDatabase;
+    const promptTagSource = {
+        owner: promptTagStatus?.owner || promptTagSetting.owner || emptySettings.private.promptTagDatabase.owner,
+        repo: promptTagStatus?.repo || promptTagSetting.repo || emptySettings.private.promptTagDatabase.repo,
+        branch: promptTagStatus?.branch || promptTagSetting.branch || emptySettings.private.promptTagDatabase.branch,
+    };
     const channelModels = useMemo(() => collectChannelModels(channels), [channels]);
     const channelTableData = useMemo(() => channels.map((channel, index) => ({ ...channel, _index: index, _rowKey: `${index}-${channel.name}-${channel.baseUrl}` })), [channels]);
     const activeMode = editorMode[activeTab];
@@ -348,6 +383,87 @@ export default function AdminSettingsPage() {
         }
     };
 
+    const loadPromptTagStatus = async () => {
+        if (!token) return;
+        setIsPromptTagStatusLoading(true);
+        try {
+            const status = await fetchPromptTagDatabaseStatus(token);
+            setPromptTagStatus(status);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "读取 WeiLin 提示词数据库状态失败");
+        } finally {
+            setIsPromptTagStatusLoading(false);
+        }
+    };
+
+    const loadPromptTagTree = async (path = promptTagCurrentPath) => {
+        if (!token) return;
+        setIsPromptTagTreeLoading(true);
+        try {
+            const items = path ? await fetchPromptTagDatabaseTree(token, path) : await fetchPromptTagDatabaseMainTree(token);
+            setPromptTagCurrentPath(path);
+            setPromptTagTree(items);
+            setSelectedPromptTagPaths([]);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "读取 WeiLin 仓库目录失败");
+        } finally {
+            setIsPromptTagTreeLoading(false);
+        }
+    };
+
+    const refreshPromptTagDatabase = async () => {
+        await Promise.all([loadPromptTagStatus(), loadPromptTagTree(promptTagCurrentPath)]);
+    };
+
+    const installSelectedPromptTagPackages = async () => {
+        if (!token) return;
+        const selectedFiles = selectedPromptTagPaths.filter((path) => path.toLowerCase().endsWith(".sql"));
+        if (!selectedFiles.length) {
+            message.warning("请先勾选要安装的 SQL 文件");
+            return;
+        }
+        const groups = groupPromptTagPackagePathsByType(selectedFiles);
+        const mergedResult: AdminPromptTagInstallResult = {
+            installed: [],
+            skipped: [],
+            failed: [],
+            status: promptTagStatus || {
+                enabled: Boolean(promptTagSetting.enabled),
+                owner: promptTagSource.owner,
+                repo: promptTagSource.repo,
+                branch: promptTagSource.branch,
+                tagCount: 0,
+                danbooruTagCount: 0,
+                installedPackages: [],
+            },
+        };
+        setIsPromptTagInstalling(true);
+        try {
+            for (const type of ["tags", "danbooru"] as AdminPromptTagPackageType[]) {
+                const paths = groups[type];
+                if (!paths.length) continue;
+                const result = await installPromptTagDatabasePackages(token, { type, paths });
+                mergedResult.installed.push(...result.installed);
+                mergedResult.skipped.push(...result.skipped);
+                mergedResult.failed.push(...result.failed);
+                mergedResult.status = result.status;
+            }
+            setPromptTagInstallResult(mergedResult);
+            setPromptTagStatus(mergedResult.status);
+            message.success(`安装完成：新增 ${mergedResult.installed.length}，跳过 ${mergedResult.skipped.length}，失败 ${mergedResult.failed.length}`);
+            await Promise.all([loadPromptTagStatus(), loadPromptTagTree(promptTagCurrentPath)]);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "安装 WeiLin SQL 包失败");
+        } finally {
+            setIsPromptTagInstalling(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!token) return;
+        void loadPromptTagStatus();
+    }, [token]);
+
     const testChannel = testChannelIndex === null ? null : normalizeChannel(channels[testChannelIndex]);
     const testModels = (testChannel?.models || []).filter((model) => model.toLowerCase().includes(testKeyword.trim().toLowerCase()));
 
@@ -555,6 +671,115 @@ export default function AdminSettingsPage() {
                                             </Form.Item>
                                         </Col>
                                     </Row>
+                                </Card>
+                                <Card
+                                    size="small"
+                                    title="提示词数据库 / WeiLin Prompt 数据库"
+                                    extra={
+                                        <Space wrap>
+                                            <Button icon={<ReloadOutlined />} loading={isPromptTagStatusLoading || isPromptTagTreeLoading} onClick={() => void refreshPromptTagDatabase()}>
+                                                刷新状态/读取仓库根目录
+                                            </Button>
+                                            <Button type="primary" loading={isPromptTagInstalling} disabled={!selectedPromptTagPaths.length} onClick={() => void installSelectedPromptTagPackages()}>
+                                                安装选中 SQL（{selectedPromptTagPaths.length}）
+                                            </Button>
+                                        </Space>
+                                    }
+                                >
+                                    <Flex vertical gap={16}>
+                                        <Typography.Text type="secondary">第一版固定使用 WeiLin 官方 Prompt 仓库；不会自动下载完整仓库，只有点击安装时才会下载并执行选中的 SQL 文件。</Typography.Text>
+                                        <Row gutter={[16, 12]} align="middle">
+                                            <Col xs={24} md={6}>
+                                                <Form.Item name={["private", "promptTagDatabase", "enabled"]} label="启用提示词数据库" valuePropName="checked">
+                                                    <Switch />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={18}>
+                                                <Space size={8} wrap>
+                                                    <Tag color="blue">owner: {promptTagSource.owner}</Tag>
+                                                    <Tag color="blue">repo: {promptTagSource.repo}</Tag>
+                                                    <Tag color="blue">branch: {promptTagSource.branch}</Tag>
+                                                </Space>
+                                            </Col>
+                                        </Row>
+                                        <Row gutter={[16, 12]}>
+                                            <Col xs={12} md={4}>
+                                                <PromptTagStatusMetric
+                                                    label="配置状态"
+                                                    value={promptTagStatus?.enabled ?? promptTagSetting.enabled ? "已启用" : "未启用"}
+                                                    color={promptTagStatus?.enabled ?? promptTagSetting.enabled ? "success" : "default"}
+                                                />
+                                            </Col>
+                                            <Col xs={12} md={4}>
+                                                <PromptTagStatusMetric label="tags 数量" value={promptTagStatus?.tagCount ?? "-"} />
+                                            </Col>
+                                            <Col xs={12} md={4}>
+                                                <PromptTagStatusMetric label="danbooru 数量" value={promptTagStatus?.danbooruTagCount ?? "-"} />
+                                            </Col>
+                                            <Col xs={12} md={4}>
+                                                <PromptTagStatusMetric label="已安装包" value={promptTagStatus?.installedPackages.length ?? 0} />
+                                            </Col>
+                                            <Col xs={24} md={8}>
+                                                <PromptTagStatusMetric label="最近安装" value={formatDateTime(promptTagStatus?.lastInstalledAt) || "-"} />
+                                            </Col>
+                                        </Row>
+                                        {promptTagStatus?.lastError ? <Typography.Text type="danger">最近错误：{promptTagStatus.lastError}</Typography.Text> : null}
+                                        <div>
+                                            <Flex justify="space-between" align="center" gap={12} wrap style={{ marginBottom: 12 }}>
+                                                <Space size={8} wrap>
+                                                    <Typography.Text strong>仓库浏览器</Typography.Text>
+                                                    <PromptTagPathBreadcrumb path={promptTagCurrentPath} onNavigate={(path) => void loadPromptTagTree(path)} />
+                                                </Space>
+                                                <Space size={8} wrap>
+                                                    <Button size="small" disabled={!promptTagCurrentPath} onClick={() => void loadPromptTagTree(parentPromptTagPath(promptTagCurrentPath))}>
+                                                        返回上级
+                                                    </Button>
+                                                    <Button size="small" loading={isPromptTagTreeLoading} onClick={() => void loadPromptTagTree(promptTagCurrentPath)}>
+                                                        刷新当前目录
+                                                    </Button>
+                                                </Space>
+                                            </Flex>
+                                            <Table
+                                                size="small"
+                                                rowKey="path"
+                                                loading={isPromptTagTreeLoading}
+                                                pagination={false}
+                                                dataSource={promptTagTree}
+                                                rowSelection={{
+                                                    selectedRowKeys: selectedPromptTagPaths,
+                                                    getCheckboxProps: (item) => ({ disabled: item.kind !== "file" || !item.path.toLowerCase().endsWith(".sql") }),
+                                                    onChange: (keys) => setSelectedPromptTagPaths(keys.map(String)),
+                                                }}
+                                                locale={{ emptyText: "点击“刷新状态/读取仓库根目录”读取 tags / danbooru 目录" }}
+                                                columns={[
+                                                    {
+                                                        title: "名称",
+                                                        dataIndex: "name",
+                                                        render: (value: string, item: AdminPromptTagPackage) =>
+                                                            item.kind === "dir" ? (
+                                                                <Button type="link" icon={<FolderOutlined />} onClick={() => void loadPromptTagTree(item.path)}>
+                                                                    {value}
+                                                                </Button>
+                                                            ) : (
+                                                                <Space size={8}>
+                                                                    <FileTextOutlined />
+                                                                    <Typography.Text>{value}</Typography.Text>
+                                                                </Space>
+                                                            ),
+                                                    },
+                                                    { title: "类型", dataIndex: "type", width: 110, render: (value: AdminPromptTagPackageType) => <Tag>{value}</Tag> },
+                                                    { title: "大小", dataIndex: "size", width: 120, render: (value?: number) => formatBytes(value) },
+                                                    {
+                                                        title: "安装状态",
+                                                        dataIndex: "installed",
+                                                        width: 180,
+                                                        render: (_: boolean, item: AdminPromptTagPackage) => (item.kind === "file" ? <PromptTagInstallState packageItem={item} /> : <Typography.Text type="secondary">目录</Typography.Text>),
+                                                    },
+                                                ]}
+                                            />
+                                        </div>
+                                        {promptTagInstallResult ? <PromptTagInstallResultView result={promptTagInstallResult} /> : null}
+                                    </Flex>
                                 </Card>
                                 <Button type="primary" icon={<PlusOutlined />} onClick={() => openChannelDrawer(null)}>
                                     新增渠道
@@ -936,6 +1161,13 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
             enabled: setting.promptSync?.enabled !== false,
             cron: setting.promptSync?.cron || "*/5 * * * *",
         },
+        promptTagDatabase: {
+            enabled: setting.promptTagDatabase?.enabled !== false,
+            owner: setting.promptTagDatabase?.owner || "weilin9999",
+            repo: setting.promptTagDatabase?.repo || "WeiLin-Comfyui-Tools-Prompt",
+            branch: setting.promptTagDatabase?.branch || "master",
+            packages: setting.promptTagDatabase?.packages || [],
+        },
         auth: {
             linuxDo: {
                 clientId: setting.auth?.linuxDo?.clientId || "",
@@ -1008,6 +1240,138 @@ function modelSummary(models: string[]) {
     if (!models.length) return "未配置模型";
     const preview = models.slice(0, 3).join(", ");
     return models.length > 3 ? `${models.length} 个模型：${preview}...` : preview;
+}
+
+function groupPromptTagPackagePathsByType(paths: string[]): Record<AdminPromptTagPackageType, string[]> {
+    return paths.reduce<Record<AdminPromptTagPackageType, string[]>>(
+        (groups, path) => {
+            const type = promptTagPackageTypeFromPath(path);
+            groups[type].push(path);
+            return groups;
+        },
+        { tags: [], danbooru: [] },
+    );
+}
+
+function promptTagPackageTypeFromPath(path: string): AdminPromptTagPackageType {
+    return path.startsWith("danbooru/") ? "danbooru" : "tags";
+}
+
+function parentPromptTagPath(path: string) {
+    const parts = path.split("/").filter(Boolean);
+    parts.pop();
+    return parts.join("/");
+}
+
+function formatBytes(value?: number) {
+    if (!value) return "-";
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDateTime(value?: string) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+type PromptTagStatusMetricProps = {
+    label: string;
+    value: string | number;
+    color?: "success" | "default";
+};
+
+function PromptTagStatusMetric({ label, value, color }: PromptTagStatusMetricProps) {
+    return (
+        <Flex vertical gap={4}>
+            <Typography.Text type="secondary">{label}</Typography.Text>
+            <Tag color={color}>{value}</Tag>
+        </Flex>
+    );
+}
+
+type PromptTagPathBreadcrumbProps = {
+    path: string;
+    onNavigate: (path: string) => void;
+};
+
+function PromptTagPathBreadcrumb({ path, onNavigate }: PromptTagPathBreadcrumbProps) {
+    const parts = path.split("/").filter(Boolean);
+    return (
+        <Space size={4} wrap>
+            <Button size="small" type={!path ? "primary" : "default"} onClick={() => onNavigate("")}>
+                根目录
+            </Button>
+            {parts.map((part, index) => {
+                const nextPath = parts.slice(0, index + 1).join("/");
+                return (
+                    <Button key={nextPath} size="small" type={nextPath === path ? "primary" : "default"} onClick={() => onNavigate(nextPath)}>
+                        {part}
+                    </Button>
+                );
+            })}
+        </Space>
+    );
+}
+
+type PromptTagInstallStateProps = {
+    packageItem: AdminPromptTagPackage;
+};
+
+function PromptTagInstallState({ packageItem }: PromptTagInstallStateProps) {
+    if (packageItem.error) {
+        return <Typography.Text type="danger">失败：{packageItem.error}</Typography.Text>;
+    }
+    if (packageItem.installed) {
+        return <Tag color="success">已安装{packageItem.installedAt ? ` · ${formatDateTime(packageItem.installedAt)}` : ""}</Tag>;
+    }
+    return <Tag>未安装</Tag>;
+}
+
+type PromptTagInstallResultViewProps = {
+    result: AdminPromptTagInstallResult;
+};
+
+function PromptTagInstallResultView({ result }: PromptTagInstallResultViewProps) {
+    return (
+        <Card size="small" title="最近一次安装结果" variant="borderless" style={{ background: "var(--ant-color-fill-quaternary)" }}>
+            <Flex vertical gap={10}>
+                <Space wrap>
+                    <Tag color="success">新增 {result.installed.length}</Tag>
+                    <Tag color="processing">跳过 {result.skipped.length}</Tag>
+                    <Tag color={result.failed.length ? "error" : "default"}>失败 {result.failed.length}</Tag>
+                </Space>
+                <PromptTagResultList title="新增" items={result.installed} />
+                <PromptTagResultList title="跳过" items={result.skipped} />
+                <PromptTagResultList title="失败" items={result.failed} showError />
+            </Flex>
+        </Card>
+    );
+}
+
+type PromptTagResultListProps = {
+    title: string;
+    items: AdminPromptTagInstallResult["installed"];
+    showError?: boolean;
+};
+
+function PromptTagResultList({ title, items, showError = false }: PromptTagResultListProps) {
+    if (!items.length) return null;
+    return (
+        <Flex vertical gap={4}>
+            <Typography.Text strong>{title}</Typography.Text>
+            <Space direction="vertical" size={2} style={{ width: "100%" }}>
+                {items.map((item) => (
+                    <Typography.Text key={`${title}-${item.type}-${item.path}`} type={showError ? "danger" : undefined} style={{ wordBreak: "break-all" }}>
+                        {item.path}
+                        {showError && item.error ? `：${item.error}` : ""}
+                    </Typography.Text>
+                ))}
+            </Space>
+        </Flex>
+    );
 }
 
 function parseTabJson(tab: "public", value: string): AdminSettings["public"] | null;

@@ -2,8 +2,5 @@
   "title": "开发文档",
   "root": true,
   "defaultOpen": true,
-  "pages": [
-    "local-development",
-    "canvas-data-structure"
-  ]
+  "pages": ["local-development", "canvas-data-structure", "backend-database"]
 }

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ArrowUp, ChevronDown, LoaderCircle, Square } from "lucide-react";
 import { Button } from "antd";
 
-import { TagAutocomplete } from "@/components/tag-autocomplete";
+import { PromptBlockEditor } from "@/components/prompt-block-editor";
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
@@ -14,7 +14,6 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
-import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
@@ -60,11 +59,17 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         onConfigChange(node.id, { negativePrompt: value });
     };
 
+    const selectLibraryPrompt = (value: string) => {
+        updatePrompt(value);
+        onConfigChange(node.id, { promptTokens: [] });
+    };
+
     const submit = () => {
         const text = prompt.trim();
         if (!text || isRunning) return;
         onGenerate(node.id, mode, text);
         setPrompt("");
+        onConfigChange(node.id, { promptTokens: [] });
     };
 
     return (
@@ -75,13 +80,15 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
-            <CanvasResourceMentionTextarea
+            <PromptBlockEditor
                 value={prompt}
-                references={mentionReferences}
                 onChange={updatePrompt}
+                tokens={node.metadata?.promptTokens?.length ? node.metadata.promptTokens : undefined}
+                onTokensChange={(nextTokens) => onConfigChange(node.id, { promptTokens: nextTokens })}
+                mentionReferences={mentionReferences}
                 onSubmit={submit}
-                enableTagAutocomplete={mode === "image"}
-                className="thin-scrollbar h-24 w-full resize-none rounded-xl border px-3 py-2 text-sm leading-5 outline-none"
+                rows={3}
+                className="thin-scrollbar rounded-xl text-sm"
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
@@ -96,13 +103,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </span>
                     </button>
                     {negativePromptOpen ? (
-                        <TagAutocomplete
+                        <PromptBlockEditor
                             value={node.metadata?.negativePrompt || ""}
                             onChange={updateNegativePrompt}
-                            inputType="textarea"
+                            tokens={node.metadata?.negativePromptTokens?.length ? node.metadata.negativePromptTokens : undefined}
+                            onTokensChange={(nextTokens) => onConfigChange(node.id, { negativePromptTokens: nextTokens })}
+                            compact
                             rows={2}
-                            autoResize={false}
-                            className="thin-scrollbar mt-1.5 w-full resize-none rounded-lg border px-2 py-1.5 text-xs outline-none"
+                            className="thin-scrollbar mt-1.5 rounded-lg text-xs"
                             style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }}
                             placeholder="留空使用默认负面提示词"
                         />
@@ -112,7 +120,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    <CanvasPromptLibrary onSelect={updatePrompt} />
+                    <CanvasPromptLibrary onSelect={selectLibraryPrompt} />
                     {mode === "image" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />

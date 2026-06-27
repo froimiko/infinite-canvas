@@ -1,3 +1,5 @@
+import { searchPromptTags, type PromptTagSearchResult } from "@/services/api/prompt-tags";
+
 export interface TagSearchResult {
     name: string;
     zhName: string;
@@ -97,6 +99,27 @@ export async function loadTagData() {
 export async function searchTags(query: string, limit = 20): Promise<TagSearchResult[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
+    try {
+        const results = await searchPromptTags({ keyword: trimmed, limit });
+        if (results.length > 0) return results.map(mapPromptTagResult);
+    } catch {
+        // WeiLin DB API is the primary source. Keep the local Worker as an offline/disabled fallback.
+    }
+    return searchTagsWithWorker(trimmed, limit);
+}
+
+function mapPromptTagResult(result: PromptTagSearchResult): TagSearchResult {
+    const category = result.source === "danbooru" ? Number(result.colorId) || 0 : 0;
+    return {
+        name: result.text,
+        zhName: result.translation || "",
+        category,
+        count: result.count || result.hot || result.createTime || 0,
+        score: result.score,
+    };
+}
+
+async function searchTagsWithWorker(query: string, limit: number): Promise<TagSearchResult[]> {
     const currentWorker = initWorker();
     if (!isLoaded) {
         try {
@@ -121,7 +144,7 @@ export async function searchTags(query: string, limit = 20): Promise<TagSearchRe
                 resolve([]);
             },
         });
-        currentWorker.postMessage({ type: "search", id, query: trimmed, limit });
+        currentWorker.postMessage({ type: "search", id, query, limit });
     });
 }
 

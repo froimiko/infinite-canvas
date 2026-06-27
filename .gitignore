@@ -5,6 +5,7 @@ node_modules/
 !.env.example
 data/
 t2i-i2v-nai-main/
+WeiLin-Comfyui-Tools-main/
 *.log
 *.tsbuildinfo
 .DS_Store

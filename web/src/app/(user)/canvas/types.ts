@@ -1,3 +1,4 @@
+import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
 import type { NovelAISettings } from "@/types/image";
 
 export type Position = {
@@ -27,7 +28,9 @@ export type CanvasNodeMetadata = Partial<NovelAISettings> & {
     content?: string;
     composerContent?: string;
     prompt?: string;
+    promptTokens?: PromptBlockToken[];
     negativePrompt?: string;
+    negativePromptTokens?: PromptBlockToken[];
     status?: CanvasNodeStatus;
     errorDetails?: string;
     fontSize?: number;

@@ -66,9 +66,10 @@ type PublicLinuxDoAuthSetting struct {
 
 // PrivateSetting 私有配置。
 type PrivateSetting struct {
-	Channels   []ModelChannel     `json:"channels"`
-	PromptSync PromptSyncSetting  `json:"promptSync"`
-	Auth       PrivateAuthSetting `json:"auth"`
+	Channels          []ModelChannel           `json:"channels"`
+	PromptSync        PromptSyncSetting        `json:"promptSync"`
+	PromptTagDatabase PromptTagDatabaseSetting `json:"promptTagDatabase"`
+	Auth              PrivateAuthSetting       `json:"auth"`
 }
 
 // PromptSyncSetting 提示词定时同步配置。

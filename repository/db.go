@@ -69,7 +69,14 @@ func DB() (*gorm.DB, error) {
 			&model.Prompt{},
 			&model.Asset{},
 			&model.Setting{},
+			&model.PromptTagTag{},
+			&model.PromptDanbooruTag{},
+			&model.PromptTagInstalledPackage{},
 		)
+		if dbErr != nil {
+			return
+		}
+		dbErr = ensurePromptTagSchema(db)
 	})
 	return db, dbErr
 }

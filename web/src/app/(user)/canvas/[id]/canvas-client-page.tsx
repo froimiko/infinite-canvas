@@ -65,6 +65,7 @@ import {
 } from "../types";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio } from "@/types/media";
+import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
 
 type CanvasClipboard = {
     nodes: CanvasNodeData[];
@@ -2054,8 +2055,10 @@ function InfiniteCanvasPage() {
                     const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
                     const negativePrompt = (sourceNode?.metadata?.negativePrompt || "").trim();
+                    const negativePromptTokens = sourceNode?.metadata?.negativePromptTokens;
+                    const promptTokens = sourceNode?.metadata?.promptTokens;
                     const requestOptions = negativePrompt ? { negativePrompt } : undefined;
-                    const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages, negativePrompt);
+                    const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages, negativePrompt, negativePromptTokens, promptTokens);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
@@ -2410,6 +2413,8 @@ function InfiniteCanvasPage() {
             const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
             const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
             const negativePrompt = (savedImageMetadata?.negativePrompt || sourceNode.metadata?.negativePrompt || node.metadata?.negativePrompt || "").trim();
+            const negativePromptTokens = savedImageMetadata?.negativePromptTokens || sourceNode.metadata?.negativePromptTokens || node.metadata?.negativePromptTokens;
+            const promptTokens = savedImageMetadata?.promptTokens || sourceNode.metadata?.promptTokens || node.metadata?.promptTokens;
             const requestOptions = negativePrompt ? { negativePrompt } : undefined;
             if (!prompt) {
                 message.warning("找不到提示词，无法重试");
@@ -2496,8 +2501,10 @@ function InfiniteCanvasPage() {
                           ...normalizeNovelAISettings(generationConfig),
                           references: savedImageMetadata.references,
                           negativePrompt,
+                          negativePromptTokens,
+                          promptTokens,
                       }
-                    : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages, negativePrompt);
+                    : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages, negativePrompt, negativePromptTokens, promptTokens);
                 setNodes((prev) =>
                     prev.map((item) =>
                         item.id === node.id
@@ -3201,7 +3208,15 @@ function audioMetadata(audio: UploadedFile): CanvasNodeMetadata {
     return { content: audio.url, storageKey: audio.storageKey, status: "success", bytes: audio.bytes, mimeType: audio.mimeType || "audio/mpeg", durationMs: audio.durationMs };
 }
 
-function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[], negativePrompt?: string): CanvasNodeMetadata {
+function buildImageGenerationMetadata(
+    type: CanvasImageGenerationType,
+    config: AiConfig,
+    count: number,
+    references: ReferenceImage[],
+    negativePrompt?: string,
+    negativePromptTokens?: PromptBlockToken[],
+    promptTokens?: PromptBlockToken[],
+): CanvasNodeMetadata {
     return {
         generationType: type,
         model: config.model,
@@ -3210,6 +3225,8 @@ function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: A
         count,
         ...normalizeNovelAISettings(config),
         negativePrompt: negativePrompt?.trim() || undefined,
+        negativePromptTokens: negativePromptTokens?.length ? negativePromptTokens : undefined,
+        promptTokens: promptTokens?.length ? promptTokens : undefined,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
     };
 }

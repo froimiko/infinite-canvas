@@ -7,8 +7,8 @@ import localforage from "localforage";
 import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
-import { TagAutocomplete } from "@/components/tag-autocomplete";
 import { ModelPicker } from "@/components/model-picker";
+import { PromptBlockEditor } from "@/components/prompt-block-editor";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -22,6 +22,7 @@ import { requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { NovelAISettings, ReferenceImage } from "@/types/image";
+import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
 
 type GeneratedImage = {
     id: string;
@@ -46,7 +47,9 @@ type GenerationLog = {
     createdAt: number;
     title: string;
     prompt: string;
+    promptTokens?: PromptBlockToken[];
     negativePrompt?: string;
+    negativePromptTokens?: PromptBlockToken[];
     time: string;
     model: string;
     config: GenerationLogConfig;
@@ -100,7 +103,9 @@ export default function ImagePage() {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
+    const [promptTokens, setPromptTokens] = useState<PromptBlockToken[]>([]);
     const [negativePrompt, setNegativePrompt] = useState("");
+    const [negativePromptTokens, setNegativePromptTokens] = useState<PromptBlockToken[]>([]);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
@@ -206,7 +211,9 @@ export default function ImagePage() {
             saveLog(
                 buildLog({
                     prompt: text,
+                    promptTokens: snapshot.promptTokens,
                     negativePrompt: snapshot.negativePrompt,
+                    negativePromptTokens: snapshot.negativePromptTokens,
                     model,
                     config: { ...snapshot.config, count: String(generationCount) },
                     references: snapshot.references,
@@ -250,6 +257,7 @@ export default function ImagePage() {
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
         if (payload.kind === "text") {
             setPrompt(payload.content);
+            setPromptTokens([]);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
             setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
@@ -261,7 +269,9 @@ export default function ImagePage() {
 
     const createSession = () => {
         setPrompt("");
+        setPromptTokens([]);
         setNegativePrompt("");
+        setNegativePromptTokens([]);
         setReferences([]);
         setResults([]);
         setElapsedMs(0);
@@ -291,7 +301,9 @@ export default function ImagePage() {
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
+        setPromptTokens(log.promptTokens || []);
         setNegativePrompt(log.negativePrompt || "");
+        setNegativePromptTokens(log.negativePromptTokens || []);
         setReferences(log.references || []);
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
@@ -312,10 +324,10 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, negativePrompt: negativePrompt.trim(), config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        return { text, promptTokens: [...promptTokens], negativePrompt: negativePrompt.trim(), negativePromptTokens: [...negativePromptTokens], config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; negativePrompt: string; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (index: number, snapshot: { text: string; promptTokens: PromptBlockToken[]; negativePrompt: string; negativePromptTokens: PromptBlockToken[]; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
             const requestOptions = snapshot.negativePrompt ? { negativePrompt: snapshot.negativePrompt } : undefined;
@@ -386,11 +398,13 @@ export default function ImagePage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <TagAutocomplete
+                                <PromptBlockEditor
                                     value={prompt}
                                     onChange={setPrompt}
+                                    tokens={promptTokens.length ? promptTokens : undefined}
+                                    onTokensChange={setPromptTokens}
                                     rows={7}
-                                    className="w-full resize-none rounded-md border border-stone-300 bg-transparent px-3 py-2 outline-none transition focus:border-blue-500 dark:border-stone-700"
+                                    className="rounded-md border-stone-300 bg-transparent transition focus-within:border-blue-500 dark:border-stone-700"
                                     placeholder="描述画面主体、风格、构图、光线和用途"
                                 />
                             </div>
@@ -400,11 +414,13 @@ export default function ImagePage() {
                                     <span className="text-base font-semibold">负面提示词（NAI）</span>
                                     <span className="text-xs text-stone-500 dark:text-stone-400">留空使用默认</span>
                                 </div>
-                                <TagAutocomplete
+                                <PromptBlockEditor
                                     value={negativePrompt}
                                     onChange={setNegativePrompt}
+                                    tokens={negativePromptTokens.length ? negativePromptTokens : undefined}
+                                    onTokensChange={setNegativePromptTokens}
                                     rows={3}
-                                    className="w-full resize-none rounded-md border border-stone-300 bg-transparent px-3 py-2 outline-none transition focus:border-blue-500 dark:border-stone-700"
+                                    className="rounded-md border-stone-300 bg-transparent transition focus-within:border-blue-500 dark:border-stone-700"
                                     placeholder="例如：lowres, bad anatomy, blurry"
                                 />
                             </div>
@@ -524,7 +540,14 @@ export default function ImagePage() {
                     <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
-            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
+            <PromptSelectDialog
+                open={promptDialogOpen}
+                onOpenChange={setPromptDialogOpen}
+                onSelect={(value) => {
+                    setPrompt(value);
+                    setPromptTokens([]);
+                }}
+            />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
@@ -775,7 +798,9 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         createdAt: log.createdAt || Date.now(),
         title: log.title || log.model || "未命名",
         prompt: log.prompt || log.title || "",
+        promptTokens: log.promptTokens,
         negativePrompt: log.negativePrompt || "",
+        negativePromptTokens: log.negativePromptTokens,
         time: log.time || new Date().toLocaleString("zh-CN", { hour12: false }),
         model: log.model || config.imageModel || "",
         config,
@@ -832,7 +857,9 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
 
 function buildLog({
     prompt,
+    promptTokens,
     negativePrompt,
+    negativePromptTokens,
     model,
     config,
     references,
@@ -843,7 +870,9 @@ function buildLog({
     images,
 }: {
     prompt: string;
+    promptTokens?: PromptBlockToken[];
     negativePrompt?: string;
+    negativePromptTokens?: PromptBlockToken[];
     model: string;
     config: GenerationLogConfig;
     references: ReferenceImage[];
@@ -866,7 +895,9 @@ function buildLog({
         createdAt: Date.now(),
         title: prompt.slice(0, 12) || "未命名",
         prompt,
+        promptTokens,
         negativePrompt: negativePrompt?.trim() || "",
+        negativePromptTokens,
         time: new Date().toLocaleString("zh-CN", { hour12: false }),
         model,
         config: logConfig,

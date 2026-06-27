@@ -1,3 +1,5 @@
+import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
+
 export type ReferenceImage = {
     id: string;
     name: string;
@@ -14,7 +16,9 @@ export type NovelAIAqtPreset = "safe" | "nai" | "full" | "balanced" | "anime" | 
 export type NovelAICharacterPrompt = {
     displayName: string;
     characterPrompt: string;
+    characterPromptTokens?: PromptBlockToken[];
     characterNegativePrompt?: string;
+    characterNegativePromptTokens?: PromptBlockToken[];
     coords?: { x: number; y: number };
 };
 

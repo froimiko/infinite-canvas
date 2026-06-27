@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- [新增] 接入 WeiLin Prompt 数据库后台安装与后端 tag 补全 / 翻译 API，NovelAI 提示词输入升级为可拖拽、可禁用、可显示翻译的积木块编辑器。
+- [新增] 生图工作台、NovelAI 角色提示词和画布正/负提示词支持提示词积木块 metadata 保存恢复，画布正向提示词保留 `@mention` 资源引用优先交互。
+
 ## v0.6.0 - 2026-06-26
 
 - [新增] 补全 NovelAI 高级生图参数：模型、采样器、尺寸、步数、CFG、seed、UC Preset、noise schedule、AQT、Variety+ 与 V4 角色提示词。

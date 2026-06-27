@@ -1,0 +1,80 @@
+---
+title: 后端数据库结构
+description: Go 后端 GORM 表结构和本地 WeiLin 提示词数据库说明
+---
+
+# 后端数据库结构
+
+本文档记录 Go 后端当前会通过 GORM 初始化或访问的主要数据表。项目仍处于开发阶段，数据库结构可能随功能直接调整。
+
+## WeiLin 提示词数据库
+
+NovelAI 提示词积木块编辑器使用后端托管的 WeiLin tag / danbooru 数据库作为补全和翻译来源。
+
+### 管理员安装流程
+
+- 后台系统设置中提供“提示词数据库 / WeiLin Prompt 数据库”管理区域。
+- 第一版固定来源为 `weilin9999/WeiLin-Comfyui-Tools-Prompt` 的 `master` 分支。
+- 管理员手动浏览 `tags/` 和 `danbooru/` 目录，选择要安装的 `.sql` 文件。
+- 后端只允许安装固定官方仓库下的 `tags/**/*.sql` 与 `danbooru/**/*.sql`。
+- SQL 内容执行方式参考 WeiLin 项目：在固定来源、固定路径和管理员手动触发的前提下执行选中 SQL，不做逐句 SQL 白名单解析。
+- 当前任务未在本地下载或执行任何 WeiLin SQL；需要在部署环境中由管理员手动安装。
+
+### `tag_tags`
+
+WeiLin tags 数据表，字段兼容 WeiLin SQL 包：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id_index` | integer | 主键，自增 |
+| `subgroup_id` | integer | 分组 ID |
+| `text` | text | tag 原文 |
+| `desc` | text | tag 描述 / 翻译 |
+| `color` | text | WeiLin tag 颜色 |
+| `create_time` | integer | WeiLin 数据中的创建时间或排序字段 |
+| `t_uuid` | text | tag UUID |
+| `g_uuid` | text | group UUID |
+
+后端搜索时会匹配 `text` 和 `desc`，并把 `desc` 作为前端翻译文本返回。
+
+### `danbooru_tag`
+
+WeiLin Danbooru 数据表，字段兼容 WeiLin SQL 包：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id_index` | integer | 主键，自增 |
+| `tag` | text | Danbooru tag 原文 |
+| `color_id` | integer | Danbooru 分类颜色 ID |
+| `translate` | text | 中文翻译 |
+| `hot` | integer | 热度 |
+| `aliases` | integer | 别名数量 |
+
+后端搜索时会匹配 `tag` 和 `translate`，并优先按 `hot`、`aliases` 排序。
+
+### `prompt_tag_installed_packages`
+
+记录已安装的 WeiLin SQL 包，用于后台状态展示和避免重复安装同一路径。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `path` | string | SQL 包路径，主键 |
+| `type` | string | `tags` 或 `danbooru` |
+| `source_owner` | string | GitHub owner |
+| `source_repo` | string | GitHub repo |
+| `branch` | string | GitHub branch |
+| `sha` | string | 预留的远程文件 SHA |
+| `size` | integer | SQL 文件大小 |
+| `installed_at` | string | 安装时间 |
+| `updated_at` | string | 记录更新时间 |
+| `error` | string | 安装失败信息；为空表示安装成功 |
+
+## 前端 token metadata 关系
+
+提示词积木块的禁用、翻译、拖拽顺序等信息保存在前端 metadata 中，例如：
+
+- 生图工作台历史记录：`promptTokens`、`negativePromptTokens`
+- NovelAI V4 角色提示词：`characterPromptTokens`、`characterNegativePromptTokens`
+- 画布节点 metadata：`promptTokens`、`negativePromptTokens`
+
+生成请求仍只提交最终 prompt 字符串。禁用 token 会在序列化时排除；NovelAI API payload 不会携带 token metadata。

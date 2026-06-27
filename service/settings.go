@@ -125,6 +125,7 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		setting.Channels = []model.ModelChannel{}
 	}
 	setting.PromptSync = normalizePromptSyncSetting(setting.PromptSync)
+	setting.PromptTagDatabase = normalizePromptTagDatabaseSetting(setting.PromptTagDatabase)
 	for i := range setting.Channels {
 		if setting.Channels[i].Protocol == "" {
 			setting.Channels[i].Protocol = "openai"
@@ -137,6 +138,61 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		}
 	}
 	return setting
+}
+
+func normalizePromptTagDatabaseSetting(setting model.PromptTagDatabaseSetting) model.PromptTagDatabaseSetting {
+	if setting.Enabled == nil {
+		enabled := true
+		setting.Enabled = &enabled
+	}
+	setting.Owner = strings.TrimSpace(setting.Owner)
+	if setting.Owner == "" {
+		setting.Owner = model.PromptTagDatabaseDefaultOwner
+	}
+	setting.Repo = strings.TrimSpace(setting.Repo)
+	if setting.Repo == "" {
+		setting.Repo = model.PromptTagDatabaseDefaultRepo
+	}
+	setting.Branch = strings.TrimSpace(setting.Branch)
+	if setting.Branch == "" {
+		setting.Branch = model.PromptTagDatabaseDefaultBranch
+	}
+	if setting.Packages == nil {
+		setting.Packages = []model.PromptTagDatabasePackage{}
+	}
+	for i := range setting.Packages {
+		setting.Packages[i].Path = strings.TrimSpace(setting.Packages[i].Path)
+		setting.Packages[i].Name = strings.TrimSpace(setting.Packages[i].Name)
+		setting.Packages[i].SHA = strings.TrimSpace(setting.Packages[i].SHA)
+		setting.Packages[i].DownloadURL = strings.TrimSpace(setting.Packages[i].DownloadURL)
+		if setting.Packages[i].Type == "" {
+			setting.Packages[i].Type = promptTagPackageTypeFromPath(setting.Packages[i].Path)
+		}
+		if setting.Packages[i].Name == "" {
+			setting.Packages[i].Name = promptTagPackageNameFromPath(setting.Packages[i].Path)
+		}
+	}
+	return setting
+}
+
+func promptTagPackageTypeFromPath(path string) model.PromptTagPackageType {
+	path = strings.TrimLeft(strings.ToLower(strings.TrimSpace(path)), "/")
+	if strings.HasPrefix(path, "danbooru/") {
+		return model.PromptTagPackageTypeDanbooru
+	}
+	return model.PromptTagPackageTypeTags
+}
+
+func promptTagPackageNameFromPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	path = strings.TrimRight(path, "/")
+	if index := strings.LastIndex(path, "/"); index >= 0 && index+1 < len(path) {
+		return path[index+1:]
+	}
+	return path
 }
 
 func hidePrivateAPIKeys(settings model.Settings) model.Settings {

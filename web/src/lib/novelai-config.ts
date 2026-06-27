@@ -1,4 +1,5 @@
 import { DEFAULT_NOVELAI_SETTINGS, NOVELAI_AQT_PRESETS, NOVELAI_NOISE_SCHEDULES, NOVELAI_SAMPLERS, NOVELAI_UC_PRESETS } from "@/components/novelai/novelai-constants";
+import { normalizePromptBlockTokens } from "@/components/prompt-block-editor/prompt-block-utils";
 import type { NovelAICharacterPrompt, NovelAISettings } from "@/types/image";
 
 export function isNovelAIModel(model: string) {
@@ -13,12 +14,16 @@ export function normalizeNovelAICharacterPrompts(prompts: unknown): NovelAIChara
             const value = item && typeof item === "object" ? (item as Partial<NovelAICharacterPrompt>) : {};
             const characterPrompt = String(value.characterPrompt || "").trim();
             const characterNegativePrompt = String(value.characterNegativePrompt || "").trim();
-            if (!characterPrompt && !characterNegativePrompt) return null;
+            const characterPromptTokens = normalizePromptBlockTokens(Array.isArray(value.characterPromptTokens) ? value.characterPromptTokens : []);
+            const characterNegativePromptTokens = normalizePromptBlockTokens(Array.isArray(value.characterNegativePromptTokens) ? value.characterNegativePromptTokens : []);
+            if (!characterPrompt && !characterNegativePrompt && !characterPromptTokens.length && !characterNegativePromptTokens.length) return null;
             const coords = value.coords && typeof value.coords === "object" ? value.coords : undefined;
             return {
                 displayName: String(value.displayName || `角色${index + 1}`).slice(0, 20),
                 characterPrompt,
+                ...(characterPromptTokens.length ? { characterPromptTokens } : {}),
                 ...(characterNegativePrompt ? { characterNegativePrompt } : {}),
+                ...(characterNegativePromptTokens.length ? { characterNegativePromptTokens } : {}),
                 ...(coords ? { coords: { x: clampInteger(coords.x, 0, 4, 2), y: clampInteger(coords.y, 0, 4, 2) } } : {}),
             } satisfies NovelAICharacterPrompt;
         })
@@ -69,7 +74,7 @@ export function buildNovelAIRequestParameters(config: Partial<NovelAISettings>):
         aqt_preset: settings.novelAIAqtPreset,
         divide_roles: settings.novelAIDivideRoles,
         use_auto_positioning: settings.novelAIUseAutoPositioning,
-        character_prompts: settings.novelAICharacterPrompts,
+        character_prompts: settings.novelAICharacterPrompts.map(({ characterPromptTokens, characterNegativePromptTokens, ...prompt }) => prompt),
     };
 }
 
