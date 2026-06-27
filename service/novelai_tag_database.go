@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -17,9 +18,10 @@ import (
 )
 
 const (
-	promptTagGitHubAPIBase = "https://api.github.com"
-	promptTagRawBase       = "https://raw.githubusercontent.com"
-	maxPromptTagSQLBytes   = 64 * 1024 * 1024
+	promptTagGitHubAPIBase   = "https://api.github.com"
+	promptTagRawBase         = "https://raw.githubusercontent.com"
+	promptTagGitHubUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+	maxPromptTagSQLBytes     = 64 * 1024 * 1024
 )
 
 var promptTagHTTPClient = &http.Client{Timeout: 60 * time.Second}
@@ -65,30 +67,15 @@ func PromptTagDatabaseStatus() (model.PromptTagDatabaseStatus, error) {
 }
 
 func PromptTagDatabaseMainTree() ([]model.PromptTagPackage, error) {
-	setting, err := promptTagDatabaseSetting()
-	if err != nil {
+	if _, err := promptTagDatabaseSetting(); err != nil {
 		return nil, err
 	}
-	apiURL := fmt.Sprintf("%s/repos/%s/%s/git/trees/%s", promptTagGitHubAPIBase, url.PathEscape(setting.Owner), url.PathEscape(setting.Repo), url.PathEscape(setting.Branch))
-	var payload promptTagGitHubTreeResponse
-	if err := fetchPromptTagGitHubJSON(apiURL, &payload); err != nil {
-		return nil, err
-	}
-	items := make([]model.PromptTagPackage, 0, len(payload.Tree))
-	for _, item := range payload.Tree {
-		if item.Path != "tags" && item.Path != "danbooru" {
-			continue
-		}
-		items = append(items, model.PromptTagPackage{
-			Type: promptTagPackageTypeFromPath(item.Path),
-			Kind: item.Type,
-			Path: item.Path,
-			Name: promptTagPackageNameFromPath(item.Path),
-			SHA:  item.SHA,
-			Size: item.Size,
-		})
-	}
-	return items, nil
+	// WeiLin 的根目录固定只有 tags / danbooru。这里避免每次打开后台都请求
+	// GitHub git tree API，降低匿名 API 403 / rate limit 对入口页的影响。
+	return []model.PromptTagPackage{
+		{Type: model.PromptTagPackageTypeTags, Kind: "dir", Path: "tags", Name: "tags"},
+		{Type: model.PromptTagPackageTypeDanbooru, Kind: "dir", Path: "danbooru", Name: "danbooru"},
+	}, nil
 }
 
 func PromptTagDatabaseTree(treePath string) ([]model.PromptTagPackage, error) {
@@ -233,8 +220,7 @@ func fetchPromptTagGitHubJSON(apiURL string, target any) error {
 	if err != nil {
 		return err
 	}
-	request.Header.Set("User-Agent", "infinite-canvas-prompt-tag-database")
-	request.Header.Set("Accept", "application/json")
+	applyPromptTagGitHubHeaders(request, true)
 	response, err := promptTagHTTPClient.Do(request)
 	if err != nil {
 		return safeMessageError{message: "读取 WeiLin 数据库仓库失败：网络不可达"}
@@ -242,7 +228,7 @@ func fetchPromptTagGitHubJSON(apiURL string, target any) error {
 	defer response.Body.Close()
 	body, _ := io.ReadAll(response.Body)
 	if response.StatusCode >= http.StatusBadRequest {
-		return safeMessageError{message: fmt.Sprintf("读取 WeiLin 数据库仓库失败：GitHub 返回 %d", response.StatusCode)}
+		return safeMessageError{message: promptTagGitHubErrorMessage("读取 WeiLin 数据库仓库失败", response, body)}
 	}
 	if err := json.Unmarshal(body, target); err != nil {
 		return safeMessageError{message: "读取 WeiLin 数据库仓库失败：返回格式异常"}
@@ -256,14 +242,15 @@ func downloadPromptTagSQL(setting model.PromptTagDatabaseSetting, packagePath st
 	if err != nil {
 		return "", 0, err
 	}
-	request.Header.Set("User-Agent", "infinite-canvas-prompt-tag-database")
+	applyPromptTagGitHubHeaders(request, false)
 	response, err := promptTagHTTPClient.Do(request)
 	if err != nil {
 		return "", 0, safeMessageError{message: "下载 WeiLin SQL 失败：网络不可达"}
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= http.StatusBadRequest {
-		return "", 0, safeMessageError{message: fmt.Sprintf("下载 WeiLin SQL 失败：GitHub 返回 %d", response.StatusCode)}
+		body, _ := io.ReadAll(response.Body)
+		return "", 0, safeMessageError{message: promptTagGitHubErrorMessage("下载 WeiLin SQL 失败", response, body)}
 	}
 	reader := io.LimitReader(response.Body, maxPromptTagSQLBytes+1)
 	body, err := io.ReadAll(reader)
@@ -274,6 +261,43 @@ func downloadPromptTagSQL(setting model.PromptTagDatabaseSetting, packagePath st
 		return "", int64(len(body)), safeMessageError{message: "下载 WeiLin SQL 失败：文件过大"}
 	}
 	return string(body), int64(len(body)), nil
+}
+
+func applyPromptTagGitHubHeaders(request *http.Request, wantsJSON bool) {
+	request.Header.Set("User-Agent", promptTagGitHubUserAgent)
+	if wantsJSON {
+		request.Header.Set("Accept", "application/json")
+	}
+	if token := promptTagGitHubToken(); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
+func promptTagGitHubToken() string {
+	if token := strings.TrimSpace(os.Getenv("PROMPT_TAG_GITHUB_TOKEN")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+}
+
+func promptTagGitHubErrorMessage(prefix string, response *http.Response, body []byte) string {
+	message := fmt.Sprintf("%s：GitHub 返回 %d", prefix, response.StatusCode)
+	if response.StatusCode == http.StatusForbidden {
+		message += "，可能是 GitHub 匿名 API 限流或云端出口被风控；可配置 PROMPT_TAG_GITHUB_TOKEN 或 GITHUB_TOKEN 后重试"
+	}
+	if reset := strings.TrimSpace(response.Header.Get("X-RateLimit-Reset")); reset != "" {
+		message += "，RateLimit-Reset=" + reset
+	}
+	if len(body) > 0 {
+		text := strings.TrimSpace(string(body))
+		if len(text) > 180 {
+			text = text[:180] + "..."
+		}
+		if text != "" {
+			message += "，响应：" + text
+		}
+	}
+	return message
 }
 
 func normalizePromptTagTreePath(value string) (string, error) {
