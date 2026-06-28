@@ -13,9 +13,12 @@ export type PromptBlockMentionReference = {
     active?: boolean;
 };
 
+export type PromptBlockTokenKind = "tag" | "text" | "mention" | "newline" | "lora";
+
 export type PromptBlockToken = {
     id: string;
     text: string;
+    kind?: PromptBlockTokenKind;
     translation?: string;
     disabled?: boolean;
     color?: string;
@@ -42,7 +45,7 @@ export type PromptBlockEditorProps = {
     compact?: boolean;
     rows?: number;
     maxSuggestions?: number;
-    onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
+    onKeyDown?: (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
 };
 
 export type PromptBlockSuggestion = PromptTagSearchResult;
