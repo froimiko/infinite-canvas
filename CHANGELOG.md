@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- [新增] 接入 WeiLin Prompt 数据库后台安装与后端 tag 补全 / 翻译 API，NovelAI 提示词输入升级为可拖拽、可禁用、可显示翻译的积木块编辑器。
+- [新增] 接入 WeiLin Prompt 数据库后台安装与后端 tag 补全 / 翻译 API，支持安装第三方 Danbooru 中英翻译 CSV 词库并在 WeiLin 未命中时 fallback，NovelAI 提示词输入升级为可拖拽、可禁用、可显示翻译的积木块编辑器。
 - [新增] 生图工作台、NovelAI 角色提示词和画布正/负提示词支持提示词积木块 metadata 保存恢复，画布正向提示词保留 `@mention` 资源引用优先交互。
 - [优化] 提示词编辑器改为原生 textarea 主输入 + 下方提示词块辅助视图，提升长 prompt、自然语言、复制粘贴和单 token 操作体验。
 

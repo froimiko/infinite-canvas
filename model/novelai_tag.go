@@ -4,6 +4,9 @@ const (
 	PromptTagDatabaseDefaultOwner  = "weilin9999"
 	PromptTagDatabaseDefaultRepo   = "WeiLin-Comfyui-Tools-Prompt"
 	PromptTagDatabaseDefaultBranch = "master"
+
+	PromptTagTranslationDatabaseDefaultOwner = "ffdkj"
+	PromptTagTranslationDatabaseDefaultRepo  = "ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
 )
 
 // PromptTagPackageType 标识 WeiLin 提示词数据库 SQL 包类型。
@@ -30,6 +33,48 @@ type PromptTagDatabaseSetting struct {
 	Repo     string                     `json:"repo"`
 	Branch   string                     `json:"branch"`
 	Packages []PromptTagDatabasePackage `json:"packages,omitempty"`
+}
+
+// PromptTagTranslationDatabaseSetting 是管理员私有设置中的第三方离线翻译词库配置。
+type PromptTagTranslationDatabaseSetting struct {
+	Enabled *bool  `json:"enabled"`
+	Owner   string `json:"owner"`
+	Repo    string `json:"repo"`
+}
+
+// PromptTagTranslationAsset 描述第三方翻译词库 release 中可安装的 CSV asset。
+type PromptTagTranslationAsset struct {
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	DownloadURL string `json:"downloadUrl"`
+	ReleaseTag  string `json:"releaseTag"`
+	Installed   bool   `json:"installed,omitempty"`
+	InstalledAt string `json:"installedAt,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+// PromptTagTranslationDatabaseStatus 汇总第三方翻译词库安装状态。
+type PromptTagTranslationDatabaseStatus struct {
+	Enabled           bool                                   `json:"enabled"`
+	Owner             string                                 `json:"owner"`
+	Repo              string                                 `json:"repo"`
+	ReleaseTag        string                                 `json:"releaseTag,omitempty"`
+	TranslationCount  int64                                  `json:"translationCount"`
+	InstalledPackages []PromptTagTranslationInstalledPackage `json:"installedPackages"`
+	LastInstalledAt   string                                 `json:"lastInstalledAt,omitempty"`
+	LastError         string                                 `json:"lastError,omitempty"`
+}
+
+// PromptTagTranslationInstallRequest 是第三方翻译词库 CSV asset 安装请求。
+type PromptTagTranslationInstallRequest struct {
+	AssetName string `json:"assetName"`
+}
+
+// PromptTagTranslationInstallResult 是第三方翻译词库 CSV asset 安装结果。
+type PromptTagTranslationInstallResult struct {
+	Installed []PromptTagTranslationInstalledPackage `json:"installed"`
+	Failed    []PromptTagTranslationInstalledPackage `json:"failed"`
+	Status    PromptTagTranslationDatabaseStatus     `json:"status"`
 }
 
 // PromptTagDatabasePackage 描述管理员可选择或已选择的 WeiLin SQL 包。
@@ -107,6 +152,40 @@ type PromptDanbooruTag struct {
 
 func (PromptDanbooruTag) TableName() string {
 	return "danbooru_tag"
+}
+
+// PromptTagExternalTranslation 对应管理员安装的第三方 Danbooru 中英翻译词库。
+type PromptTagExternalTranslation struct {
+	Name           string `json:"name" gorm:"column:name;primaryKey;size:256"`
+	NormalizedName string `json:"normalizedName" gorm:"column:normalized_name;index:idx_prompt_tag_external_translations_normalized_name;size:256"`
+	Category       int64  `json:"category" gorm:"column:category;index"`
+	CNName         string `json:"cnName" gorm:"column:cn_name;index:idx_prompt_tag_external_translations_cn_name"`
+	PostCount      int64  `json:"postCount" gorm:"column:post_count;default:0;index"`
+	SourceOwner    string `json:"sourceOwner" gorm:"column:source_owner;size:128"`
+	SourceRepo     string `json:"sourceRepo" gorm:"column:source_repo;size:256"`
+	ReleaseTag     string `json:"releaseTag" gorm:"column:release_tag;size:128;index"`
+	AssetName      string `json:"assetName" gorm:"column:asset_name;size:256;index"`
+	UpdatedAt      string `json:"updatedAt" gorm:"column:updated_at"`
+}
+
+func (PromptTagExternalTranslation) TableName() string {
+	return "prompt_tag_external_translations"
+}
+
+// PromptTagTranslationInstalledPackage 记录第三方翻译词库 CSV asset 安装状态。
+type PromptTagTranslationInstalledPackage struct {
+	AssetName   string `json:"assetName" gorm:"column:asset_name;primaryKey;size:256"`
+	SourceOwner string `json:"sourceOwner" gorm:"column:source_owner;size:128"`
+	SourceRepo  string `json:"sourceRepo" gorm:"column:source_repo;size:256"`
+	ReleaseTag  string `json:"releaseTag" gorm:"column:release_tag;size:128;index"`
+	Size        int64  `json:"size"`
+	InstalledAt string `json:"installedAt" gorm:"column:installed_at;index"`
+	UpdatedAt   string `json:"updatedAt" gorm:"column:updated_at"`
+	Error       string `json:"error" gorm:"column:error"`
+}
+
+func (PromptTagTranslationInstalledPackage) TableName() string {
+	return "prompt_tag_translation_installed_packages"
 }
 
 // PromptTagInstalledPackage 记录已安装 SQL 包，避免重复执行同一 WeiLin 数据包。

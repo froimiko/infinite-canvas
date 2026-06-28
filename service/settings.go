@@ -126,6 +126,7 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 	}
 	setting.PromptSync = normalizePromptSyncSetting(setting.PromptSync)
 	setting.PromptTagDatabase = normalizePromptTagDatabaseSetting(setting.PromptTagDatabase)
+	setting.PromptTagTranslationDatabase = normalizePromptTagTranslationDatabaseSetting(setting.PromptTagTranslationDatabase)
 	for i := range setting.Channels {
 		if setting.Channels[i].Protocol == "" {
 			setting.Channels[i].Protocol = "openai"
@@ -193,6 +194,22 @@ func promptTagPackageNameFromPath(path string) string {
 		return path[index+1:]
 	}
 	return path
+}
+
+func normalizePromptTagTranslationDatabaseSetting(setting model.PromptTagTranslationDatabaseSetting) model.PromptTagTranslationDatabaseSetting {
+	if setting.Enabled == nil {
+		enabled := true
+		setting.Enabled = &enabled
+	}
+	setting.Owner = strings.TrimSpace(setting.Owner)
+	if setting.Owner == "" {
+		setting.Owner = model.PromptTagTranslationDatabaseDefaultOwner
+	}
+	setting.Repo = strings.TrimSpace(setting.Repo)
+	if setting.Repo == "" {
+		setting.Repo = model.PromptTagTranslationDatabaseDefaultRepo
+	}
+	return setting
 }
 
 func hidePrivateAPIKeys(settings model.Settings) model.Settings {

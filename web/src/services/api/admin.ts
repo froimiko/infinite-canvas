@@ -247,6 +247,44 @@ export type AdminPromptTagInstallResult = {
     status: AdminPromptTagDatabaseStatus;
 };
 
+export type AdminPromptTagTranslationAsset = {
+    name: string;
+    size: number;
+    downloadUrl: string;
+    releaseTag: string;
+    installed?: boolean;
+    installedAt?: string;
+    error?: string;
+};
+
+export type AdminPromptTagTranslationInstalledPackage = {
+    assetName: string;
+    sourceOwner: string;
+    sourceRepo: string;
+    releaseTag: string;
+    size: number;
+    installedAt: string;
+    updatedAt: string;
+    error: string;
+};
+
+export type AdminPromptTagTranslationDatabaseStatus = {
+    enabled: boolean;
+    owner: string;
+    repo: string;
+    releaseTag?: string;
+    translationCount: number;
+    installedPackages: AdminPromptTagTranslationInstalledPackage[];
+    lastInstalledAt?: string;
+    lastError?: string;
+};
+
+export type AdminPromptTagTranslationInstallResult = {
+    installed: AdminPromptTagTranslationInstalledPackage[];
+    failed: AdminPromptTagTranslationInstalledPackage[];
+    status: AdminPromptTagTranslationDatabaseStatus;
+};
+
 export type AdminPrivateSettings = {
     channels: AdminModelChannel[];
     promptSync: {
@@ -259,6 +297,11 @@ export type AdminPrivateSettings = {
         repo: string;
         branch: string;
         packages: AdminPromptTagPackage[];
+    };
+    promptTagTranslationDatabase: {
+        enabled: boolean;
+        owner: string;
+        repo: string;
     };
     auth: {
         linuxDo: {
@@ -308,4 +351,16 @@ export async function fetchPromptTagDatabaseTree(token: string, path: string) {
 
 export async function installPromptTagDatabasePackages(token: string, payload: { type: AdminPromptTagPackageType; paths: string[] }) {
     return apiPost<AdminPromptTagInstallResult>("/api/admin/prompt-tag-database/install", payload, token);
+}
+
+export async function fetchPromptTagTranslationDatabaseStatus(token: string) {
+    return apiGet<AdminPromptTagTranslationDatabaseStatus>("/api/admin/prompt-tag-translation-database/status", undefined, token);
+}
+
+export async function fetchPromptTagTranslationDatabaseAssets(token: string) {
+    return apiGet<AdminPromptTagTranslationAsset[]>("/api/admin/prompt-tag-translation-database/assets", undefined, token);
+}
+
+export async function installPromptTagTranslationDatabasePackage(token: string, payload: { assetName: string }) {
+    return apiPost<AdminPromptTagTranslationInstallResult>("/api/admin/prompt-tag-translation-database/install", payload, token);
 }

@@ -97,6 +97,52 @@ WeiLin Danbooru 数据表，字段兼容 WeiLin SQL 包：
 | `updated_at` | string | 记录更新时间 |
 | `error` | string | 安装失败信息；为空表示安装成功 |
 
+## 第三方提示词翻译词库
+
+NovelAI 提示词积木块翻译查询保持 WeiLin 优先；当 `tag_tags.desc` 与 `danbooru_tag.translate` 都未命中时，后端可使用管理员安装的第三方离线 Danbooru 中英翻译词库作为 fallback。
+
+### 管理员安装流程
+
+- 后台系统设置中提供“第三方翻译词库”管理区域。
+- 第一版固定来源为 `ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table` 的 latest release。
+- 后端只展示并允许安装 release assets 中的 `.csv` 文件，不接受任意 URL。
+- CSV 字段按 `name`、`category`、`cn_name`、`post_count` 解析；空 `name` 或空 `cn_name` 行会跳过。
+- 下载大小限制复用提示词数据库的 64MB 限制，并复用 `PROMPT_TAG_GITHUB_TOKEN` / `GITHUB_TOKEN` 读取 GitHub。
+
+### `prompt_tag_external_translations`
+
+管理员安装的第三方 Danbooru 中英翻译词库条目表：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `name` | string | Danbooru tag 原名，主键 |
+| `normalized_name` | string | 规范化名称索引，小写并将空格转为下划线 |
+| `category` | integer | Danbooru 分类 |
+| `cn_name` | text | 中文翻译 |
+| `post_count` | integer | Danbooru 投稿数量 |
+| `source_owner` | string | GitHub owner |
+| `source_repo` | string | GitHub repo |
+| `release_tag` | string | release tag |
+| `asset_name` | string | CSV asset 名称 |
+| `updated_at` | string | 记录更新时间 |
+
+后端翻译 fallback 查询会尝试原 token、小写 token 与空格转下划线规范化形式，例如 `blue eyes` 可命中 `blue_eyes`。
+
+### `prompt_tag_translation_installed_packages`
+
+记录第三方翻译词库 CSV asset 安装状态，用于后台状态展示和失败重试：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `asset_name` | string | CSV asset 名称，主键 |
+| `source_owner` | string | GitHub owner |
+| `source_repo` | string | GitHub repo |
+| `release_tag` | string | release tag |
+| `size` | integer | CSV 文件大小 |
+| `installed_at` | string | 安装时间 |
+| `updated_at` | string | 记录更新时间 |
+| `error` | string | 安装失败信息；为空表示安装成功 |
+
 ## 前端 token metadata 关系
 
 提示词积木块的禁用、翻译、拖拽顺序等信息保存在前端 metadata 中，例如：
