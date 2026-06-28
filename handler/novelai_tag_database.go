@@ -25,6 +25,7 @@ type promptTagTranslationsRequest struct {
 }
 
 type promptTagDatabaseInstallRequest = service.PromptTagInstallRequest
+type promptTagTranslationDatabaseInstallRequest = model.PromptTagTranslationInstallRequest
 
 type promptTagTranslationDatabaseInstallRequest = model.PromptTagTranslationInstallRequest
 

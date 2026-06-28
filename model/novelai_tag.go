@@ -103,9 +103,7 @@ type PromptTagGroup struct {
 	PUUID      string `json:"pUuid" gorm:"column:p_uuid;size:128;index"`
 }
 
-func (PromptTagGroup) TableName() string {
-	return "tag_groups"
-}
+func (PromptTagGroup) TableName() string { return "tag_groups" }
 
 // PromptTagSubgroup 对应 WeiLin tag_subgroups 二级分组表。
 type PromptTagSubgroup struct {
@@ -118,9 +116,7 @@ type PromptTagSubgroup struct {
 	GUUID      string `json:"gUuid" gorm:"column:g_uuid;size:128;index"`
 }
 
-func (PromptTagSubgroup) TableName() string {
-	return "tag_subgroups"
-}
+func (PromptTagSubgroup) TableName() string { return "tag_subgroups" }
 
 // PromptTagTag 对应 WeiLin tag_tags 表。
 type PromptTagTag struct {
@@ -136,9 +132,7 @@ type PromptTagTag struct {
 	ImageStatus int64  `json:"imageStatus" gorm:"column:image_status;default:0"`
 }
 
-func (PromptTagTag) TableName() string {
-	return "tag_tags"
-}
+func (PromptTagTag) TableName() string { return "tag_tags" }
 
 // PromptDanbooruTag 对应 WeiLin danbooru_tag 表。
 type PromptDanbooruTag struct {
@@ -150,9 +144,7 @@ type PromptDanbooruTag struct {
 	Aliases   int64  `json:"aliases" gorm:"column:aliases;default:0;index:idx_danbooru_tag_aliases"`
 }
 
-func (PromptDanbooruTag) TableName() string {
-	return "danbooru_tag"
-}
+func (PromptDanbooruTag) TableName() string { return "danbooru_tag" }
 
 // PromptTagExternalTranslation 对应管理员安装的第三方 Danbooru 中英翻译词库。
 type PromptTagExternalTranslation struct {
@@ -202,8 +194,38 @@ type PromptTagInstalledPackage struct {
 	Error       string               `json:"error"`
 }
 
-func (PromptTagInstalledPackage) TableName() string {
-	return "prompt_tag_installed_packages"
+func (PromptTagInstalledPackage) TableName() string { return "prompt_tag_installed_packages" }
+
+// PromptTagExternalTranslation 保存管理员安装的第三方离线翻译词库。
+type PromptTagExternalTranslation struct {
+	Name           string `json:"name" gorm:"primaryKey;size:256"`
+	NormalizedName string `json:"normalizedName" gorm:"size:256;index"`
+	Category       int64  `json:"category" gorm:"index"`
+	CNName         string `json:"cnName" gorm:"column:cn_name;index"`
+	PostCount      int64  `json:"postCount" gorm:"index"`
+	SourceOwner    string `json:"sourceOwner" gorm:"size:128"`
+	SourceRepo     string `json:"sourceRepo" gorm:"size:256"`
+	ReleaseTag     string `json:"releaseTag" gorm:"size:128;index"`
+	AssetName      string `json:"assetName" gorm:"size:512;index"`
+	UpdatedAt      string `json:"updatedAt" gorm:"index"`
+}
+
+func (PromptTagExternalTranslation) TableName() string { return "prompt_tag_external_translations" }
+
+// PromptTagTranslationInstalledPackage 记录第三方翻译词库 CSV asset 安装状态。
+type PromptTagTranslationInstalledPackage struct {
+	AssetName   string `json:"assetName" gorm:"primaryKey;size:512"`
+	SourceOwner string `json:"sourceOwner" gorm:"size:128"`
+	SourceRepo  string `json:"sourceRepo" gorm:"size:256"`
+	ReleaseTag  string `json:"releaseTag" gorm:"size:128;index"`
+	Size        int64  `json:"size"`
+	InstalledAt string `json:"installedAt" gorm:"index"`
+	UpdatedAt   string `json:"updatedAt"`
+	Error       string `json:"error"`
+}
+
+func (PromptTagTranslationInstalledPackage) TableName() string {
+	return "prompt_tag_translation_installed_packages"
 }
 
 // PromptTagEntry 是前端 autocomplete/translation 使用的统一 tag 记录。
