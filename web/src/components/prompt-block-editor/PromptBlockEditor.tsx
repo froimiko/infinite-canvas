@@ -118,7 +118,7 @@ export function PromptBlockEditor({
             const normalized = normalizePromptBlockTokens(nextTokens);
             setInternalTokens(normalized);
             onTokensChange?.(normalized);
-            const nextValue = serializeTokensToPrompt(normalized);
+            const nextValue = preserveTrailingPromptComma(serializeTokensToPrompt(normalized), value);
             if (nextValue !== value) {
                 lastEmittedValueRef.current = nextValue;
                 onChange(nextValue);
@@ -522,6 +522,13 @@ function insertedSeparator(value: string, word: CurrentWord, separator: string) 
     const nextChar = value[word.replaceEnd] || "";
     if (!nextChar || !isCurrentWordSeparator(nextChar)) return separator;
     return "";
+}
+
+function preserveTrailingPromptComma(nextValue: string, previousValue: string) {
+    if (!nextValue) return nextValue;
+    const trailingComma = previousValue.match(/[,，][ \t]*$/)?.[0];
+    if (!trailingComma || /[,，][ \t]*$/.test(nextValue)) return nextValue;
+    return `${nextValue}${trailingComma}`;
 }
 
 function getTextareaCursorMenuStyle(textarea: HTMLTextAreaElement, wrap: HTMLDivElement): CSSProperties {
