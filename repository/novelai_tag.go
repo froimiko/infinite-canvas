@@ -19,6 +19,8 @@ func ensurePromptTagSchema(db *gorm.DB) error {
 		&model.PromptTagTag{},
 		&model.PromptDanbooruTag{},
 		&model.PromptTagInstalledPackage{},
+		&model.PromptTagExternalTranslation{},
+		&model.PromptTagTranslationInstalledPackage{},
 	)
 }
 
@@ -62,6 +64,40 @@ func PromptTagDatabaseStatus(setting model.PromptTagDatabaseSetting) (model.Prom
 	return status, nil
 }
 
+func PromptTagTranslationDatabaseStatus(setting model.PromptTagTranslationDatabaseSetting) (model.PromptTagTranslationDatabaseStatus, error) {
+	db, err := DB()
+	if err != nil {
+		return model.PromptTagTranslationDatabaseStatus{}, err
+	}
+	var translationCount int64
+	if err := db.Model(&model.PromptTagExternalTranslation{}).Count(&translationCount).Error; err != nil {
+		return model.PromptTagTranslationDatabaseStatus{}, err
+	}
+	packages, err := ListPromptTagTranslationInstalledPackages()
+	if err != nil {
+		return model.PromptTagTranslationDatabaseStatus{}, err
+	}
+	status := model.PromptTagTranslationDatabaseStatus{
+		Enabled:           setting.Enabled,
+		Owner:             setting.Owner,
+		Repo:              setting.Repo,
+		TranslationCount:  translationCount,
+		InstalledPackages: packages,
+	}
+	for _, item := range packages {
+		if strings.TrimSpace(item.Error) == "" && item.ReleaseTag > status.ReleaseTag {
+			status.ReleaseTag = item.ReleaseTag
+		}
+		if item.InstalledAt > status.LastInstalledAt {
+			status.LastInstalledAt = item.InstalledAt
+		}
+		if strings.TrimSpace(item.Error) != "" {
+			status.LastError = item.Error
+		}
+	}
+	return status, nil
+}
+
 // ListPromptTagInstalledPackages returns installed WeiLin SQL package records ordered by install time.
 func ListPromptTagInstalledPackages() ([]model.PromptTagInstalledPackage, error) {
 	db, err := DB()
@@ -70,6 +106,18 @@ func ListPromptTagInstalledPackages() ([]model.PromptTagInstalledPackage, error)
 	}
 	items := []model.PromptTagInstalledPackage{}
 	if err := db.Order("installed_at desc, path asc").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func ListPromptTagTranslationInstalledPackages() ([]model.PromptTagTranslationInstalledPackage, error) {
+	db, err := DB()
+	if err != nil {
+		return nil, err
+	}
+	items := []model.PromptTagTranslationInstalledPackage{}
+	if err := db.Order("installed_at desc, asset_name asc").Find(&items).Error; err != nil {
 		return nil, err
 	}
 	return items, nil
@@ -104,20 +152,40 @@ func SavePromptTagInstalledPackage(item model.PromptTagInstalledPackage) (model.
 	}
 	item.Type = promptTagPackageTypeForPath(item.Type, item.Path)
 	err = db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "path"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"type",
-			"source_owner",
-			"source_repo",
-			"branch",
-			"sha",
-			"size",
-			"installed_at",
-			"updated_at",
-			"error",
-		}),
+		Columns:   []clause.Column{{Name: "path"}},
+		DoUpdates: clause.AssignmentColumns([]string{"type", "source_owner", "source_repo", "branch", "sha", "size", "installed_at", "updated_at", "error"}),
 	}).Create(&item).Error
 	return item, err
+}
+
+func SavePromptTagTranslationInstalledPackage(item model.PromptTagTranslationInstalledPackage) (model.PromptTagTranslationInstalledPackage, error) {
+	db, err := DB()
+	if err != nil {
+		return item, err
+	}
+	item.AssetName = strings.TrimSpace(item.AssetName)
+	if item.AssetName == "" {
+		return item, nil
+	}
+	err = db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "asset_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"source_owner", "source_repo", "release_tag", "size", "installed_at", "updated_at", "error"}),
+	}).Create(&item).Error
+	return item, err
+}
+
+func UpsertPromptTagExternalTranslations(items []model.PromptTagExternalTranslation) error {
+	if len(items) == 0 {
+		return nil
+	}
+	db, err := DB()
+	if err != nil {
+		return err
+	}
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"normalized_name", "category", "cn_name", "post_count", "source_owner", "source_repo", "release_tag", "asset_name", "updated_at"}),
+	}).CreateInBatches(items, 1000).Error
 }
 
 // DeletePromptTagInstalledPackage removes an installed package record by path.
@@ -174,7 +242,7 @@ func SearchPromptTags(query model.PromptTagSearchQuery) ([]model.PromptTagSearch
 }
 
 // TranslatePromptTags returns local translations for the provided tag texts.
-func TranslatePromptTags(tags []string) (map[string]string, error) {
+func TranslatePromptTags(tags []string, externalEnabled bool) (map[string]string, error) {
 	db, err := DB()
 	if err != nil {
 		return nil, err
@@ -185,7 +253,7 @@ func TranslatePromptTags(tags []string) (map[string]string, error) {
 		if key == "" || result[key] != "" {
 			continue
 		}
-		translation, err := translatePromptTag(db, key)
+		translation, err := translatePromptTag(db, key, externalEnabled)
 		if err != nil {
 			return nil, err
 		}
@@ -256,9 +324,10 @@ func searchPromptDanbooruTags(db *gorm.DB, keyword string, limit int) ([]model.P
 	return results, nil
 }
 
-func translatePromptTag(db *gorm.DB, tag string) (string, error) {
+func translatePromptTag(db *gorm.DB, tag string, externalEnabled bool) (string, error) {
+	variants := promptTagTranslationVariants(tag)
 	var tagItem model.PromptTagTag
-	err := db.Where("text = ?", tag).Order("id_index asc").First(&tagItem).Error
+	err := db.Where("text IN ?", variants).Order("id_index asc").First(&tagItem).Error
 	if err == nil && strings.TrimSpace(tagItem.Desc) != "" {
 		return tagItem.Desc, nil
 	}
@@ -267,14 +336,42 @@ func translatePromptTag(db *gorm.DB, tag string) (string, error) {
 	}
 
 	var danbooruItem model.PromptDanbooruTag
-	err = db.Where("tag = ?", tag).Order("hot desc, id_index asc").First(&danbooruItem).Error
+	err = db.Where("tag IN ?", variants).Order("hot desc, id_index asc").First(&danbooruItem).Error
 	if err == nil && strings.TrimSpace(danbooruItem.Translate) != "" {
 		return danbooruItem.Translate, nil
 	}
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return "", err
 	}
+	if !externalEnabled {
+		return "", nil
+	}
+	var external model.PromptTagExternalTranslation
+	err = db.Where("name IN ? OR normalized_name IN ?", variants, variants).Order("post_count desc, name asc").First(&external).Error
+	if err == nil {
+		return strings.TrimSpace(external.CNName), nil
+	}
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return "", err
+	}
 	return "", nil
+}
+
+func promptTagTranslationVariants(tag string) []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, value := range []string{tag, strings.ToLower(tag), strings.ReplaceAll(tag, " ", "_"), normalizePromptTagName(tag)} {
+		value = strings.TrimSpace(value)
+		if value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func normalizePromptTagName(value string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), " ", "_")
 }
 
 func normalizePromptTagSearchLimit(limit int) int {

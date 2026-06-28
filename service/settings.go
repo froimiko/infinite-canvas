@@ -126,6 +126,7 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 	}
 	setting.PromptSync = normalizePromptSyncSetting(setting.PromptSync)
 	setting.PromptTagDatabase = normalizePromptTagDatabaseSetting(setting.PromptTagDatabase)
+	setting.PromptTagTranslationDatabase = normalizePromptTagTranslationDatabaseSetting(setting.PromptTagTranslationDatabase)
 	for i := range setting.Channels {
 		if setting.Channels[i].Protocol == "" {
 			setting.Channels[i].Protocol = "openai"
@@ -171,6 +172,19 @@ func normalizePromptTagDatabaseSetting(setting model.PromptTagDatabaseSetting) m
 		if setting.Packages[i].Name == "" {
 			setting.Packages[i].Name = promptTagPackageNameFromPath(setting.Packages[i].Path)
 		}
+	}
+	return setting
+}
+
+func normalizePromptTagTranslationDatabaseSetting(setting model.PromptTagTranslationDatabaseSetting) model.PromptTagTranslationDatabaseSetting {
+	setting.Enabled = true
+	setting.Owner = strings.TrimSpace(setting.Owner)
+	if setting.Owner == "" {
+		setting.Owner = model.PromptTagTranslationDatabaseDefaultOwner
+	}
+	setting.Repo = strings.TrimSpace(setting.Repo)
+	if setting.Repo == "" {
+		setting.Repo = model.PromptTagTranslationDatabaseDefaultRepo
 	}
 	return setting
 }

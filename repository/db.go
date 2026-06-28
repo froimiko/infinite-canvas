@@ -74,6 +74,8 @@ func DB() (*gorm.DB, error) {
 			&model.PromptTagTag{},
 			&model.PromptDanbooruTag{},
 			&model.PromptTagInstalledPackage{},
+			&model.PromptTagExternalTranslation{},
+			&model.PromptTagTranslationInstalledPackage{},
 		)
 		if dbErr != nil {
 			return

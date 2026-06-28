@@ -25,6 +25,7 @@ type promptTagTranslationsRequest struct {
 }
 
 type promptTagDatabaseInstallRequest = service.PromptTagInstallRequest
+type promptTagTranslationDatabaseInstallRequest = model.PromptTagTranslationInstallRequest
 
 func AdminPromptTagDatabaseStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := service.PromptTagDatabaseStatus()
@@ -59,6 +60,35 @@ func AdminInstallPromptTagDatabasePackages(w http.ResponseWriter, r *http.Reques
 	var request promptTagDatabaseInstallRequest
 	_ = json.NewDecoder(r.Body).Decode(&request)
 	result, err := service.InstallPromptTagDatabasePackages(request)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, result)
+}
+
+func AdminPromptTagTranslationDatabaseStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := service.PromptTagTranslationDatabaseStatus()
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, status)
+}
+
+func AdminPromptTagTranslationDatabaseAssets(w http.ResponseWriter, r *http.Request) {
+	items, err := service.PromptTagTranslationDatabaseAssets()
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, items)
+}
+
+func AdminInstallPromptTagTranslationDatabasePackage(w http.ResponseWriter, r *http.Request) {
+	var request promptTagTranslationDatabaseInstallRequest
+	_ = json.NewDecoder(r.Body).Decode(&request)
+	result, err := service.InstallPromptTagTranslationDatabasePackage(request)
 	if err != nil {
 		FailError(w, err)
 		return
