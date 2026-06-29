@@ -27,8 +27,6 @@ type promptTagTranslationsRequest struct {
 type promptTagDatabaseInstallRequest = service.PromptTagInstallRequest
 type promptTagTranslationDatabaseInstallRequest = model.PromptTagTranslationInstallRequest
 
-type promptTagTranslationDatabaseInstallRequest = model.PromptTagTranslationInstallRequest
-
 func AdminPromptTagDatabaseStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := service.PromptTagDatabaseStatus()
 	if err != nil {
