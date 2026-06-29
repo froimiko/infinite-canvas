@@ -64,6 +64,7 @@ func PromptTagDatabaseStatus(setting model.PromptTagDatabaseSetting) (model.Prom
 	return status, nil
 }
 
+
 // ListPromptTagInstalledPackages returns installed WeiLin SQL package records ordered by install time.
 func ListPromptTagInstalledPackages() ([]model.PromptTagInstalledPackage, error) {
 	db, err := DB()
@@ -218,6 +219,7 @@ func SavePromptTagInstalledPackage(item model.PromptTagInstalledPackage) (model.
 	}).Create(&item).Error
 	return item, err
 }
+
 
 func UpsertPromptTagExternalTranslations(items []model.PromptTagExternalTranslation) error {
 	if len(items) == 0 {
