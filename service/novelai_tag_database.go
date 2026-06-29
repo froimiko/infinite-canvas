@@ -44,14 +44,6 @@ type promptTagGitHubContentItem struct {
 	Size        int64  `json:"size"`
 	DownloadURL string `json:"download_url"`
 }
-type promptTagGitHubReleaseResponse struct {
-	TagName string `json:"tag_name"`
-	Assets  []struct {
-		Name               string `json:"name"`
-		Size               int64  `json:"size"`
-		BrowserDownloadURL string `json:"browser_download_url"`
-	} `json:"assets"`
-}
 
 type promptTagGitHubReleaseResponse struct {
 	TagName string                         `json:"tag_name"`
@@ -186,38 +178,10 @@ func PromptTagDatabaseMainTree() ([]model.PromptTagPackage, error) {
 	if _, err := promptTagDatabaseSetting(); err != nil {
 		return nil, err
 	}
-	sort.SliceStable(assets, func(i, j int) bool { return assets[i].Name < assets[j].Name })
-	return assets, nil
-}
-
-func InstallPromptTagTranslationDatabasePackage(request model.PromptTagTranslationInstallRequest) (model.PromptTagTranslationInstallResult, error) {
-	setting, err := promptTagTranslationDatabaseSetting()
-	if err != nil { return model.PromptTagTranslationInstallResult{}, err }
-	assetName := strings.TrimSpace(request.AssetName)
-	downloadURL := strings.TrimSpace(request.DownloadURL)
-	if assetName == "" && downloadURL == "" { return model.PromptTagTranslationInstallResult{}, safeMessageError{message: "请选择要安装的 CSV 翻译词库"} }
-	assets, err := PromptTagTranslationDatabaseAssets()
-	if err != nil { return model.PromptTagTranslationInstallResult{}, err }
-	var selected model.PromptTagTranslationAsset
-	for _, asset := range assets {
-		if (assetName != "" && asset.Name == assetName) || (downloadURL != "" && asset.DownloadURL == downloadURL) { selected = asset; break }
-	}
-	if selected.Name == "" { return model.PromptTagTranslationInstallResult{}, safeMessageError{message: "只能安装官方 release 中列出的 CSV asset"} }
-	result := model.PromptTagTranslationInstallResult{Installed: []model.PromptTagTranslationInstalledPackage{}, Failed: []model.PromptTagTranslationInstalledPackage{}}
-	content, size, err := downloadPromptTagTranslationCSV(selected.DownloadURL)
-	if err != nil { failed := promptTagTranslationInstalledPackageRecord(setting, selected, size, err.Error()); _, _ = repository.SavePromptTagTranslationInstalledPackage(failed); result.Failed = append(result.Failed, failed); result.Status, _ = repository.PromptTagTranslationDatabaseStatus(setting); return result, nil }
-	if err := importPromptTagTranslationCSV(setting, selected, content); err != nil { failed := promptTagTranslationInstalledPackageRecord(setting, selected, size, err.Error()); _, _ = repository.SavePromptTagTranslationInstalledPackage(failed); result.Failed = append(result.Failed, failed); result.Status, _ = repository.PromptTagTranslationDatabaseStatus(setting); return result, nil }
-	installed := promptTagTranslationInstalledPackageRecord(setting, selected, size, "")
-	saved, err := repository.SavePromptTagTranslationInstalledPackage(installed)
-	if err != nil { installed.Error = err.Error(); result.Failed = append(result.Failed, installed); result.Status, _ = repository.PromptTagTranslationDatabaseStatus(setting); return result, nil }
-	result.Installed = append(result.Installed, saved)
-	result.Status, err = repository.PromptTagTranslationDatabaseStatus(setting)
-	return result, err
-}
-
-func PromptTagDatabaseMainTree() ([]model.PromptTagPackage, error) {
-	if _, err := promptTagDatabaseSetting(); err != nil { return nil, err }
-	return []model.PromptTagPackage{{Type: model.PromptTagPackageTypeTags, Kind: "dir", Path: "tags", Name: "tags"}, {Type: model.PromptTagPackageTypeDanbooru, Kind: "dir", Path: "danbooru", Name: "danbooru"}}, nil
+	return []model.PromptTagPackage{
+		{Type: model.PromptTagPackageTypeTags, Kind: "dir", Path: "tags", Name: "tags"},
+		{Type: model.PromptTagPackageTypeDanbooru, Kind: "dir", Path: "danbooru", Name: "danbooru"},
+	}, nil
 }
 
 func PromptTagDatabaseTree(treePath string) ([]model.PromptTagPackage, error) {
@@ -282,13 +246,23 @@ func TranslatePromptTags(tags []string) (map[string]string, error) {
 }
 
 func promptTagDatabaseSetting() (model.PromptTagDatabaseSetting, error) {
-	setting, err := promptTagDatabaseSettingForQuery(); if err != nil { return model.PromptTagDatabaseSetting{}, err }
-	if setting.Owner != model.PromptTagDatabaseDefaultOwner || setting.Repo != model.PromptTagDatabaseDefaultRepo || setting.Branch != model.PromptTagDatabaseDefaultBranch { return model.PromptTagDatabaseSetting{}, safeMessageError{message: "提示词数据库第一版仅允许使用 WeiLin 官方 Prompt 仓库"} }
+	setting, err := promptTagDatabaseSettingForQuery()
+	if err != nil {
+		return model.PromptTagDatabaseSetting{}, err
+	}
+	if setting.Owner != model.PromptTagDatabaseDefaultOwner || setting.Repo != model.PromptTagDatabaseDefaultRepo || setting.Branch != model.PromptTagDatabaseDefaultBranch {
+		return model.PromptTagDatabaseSetting{}, safeMessageError{message: "提示词数据库第一版仅允许使用 WeiLin 官方 Prompt 仓库"}
+	}
 	return setting, nil
 }
-func promptTagDatabaseSettingForQuery() (model.PromptTagDatabaseSetting, error) { settings, err := repository.GetSettings(); if err != nil { return model.PromptTagDatabaseSetting{}, err }; return normalizePrivateSetting(settings.Private).PromptTagDatabase, nil }
-func promptTagTranslationDatabaseSetting() (model.PromptTagTranslationDatabaseSetting, error) { setting, err := promptTagTranslationDatabaseSettingForQuery(); if err != nil { return model.PromptTagTranslationDatabaseSetting{}, err }; if setting.Owner != model.PromptTagTranslationDatabaseDefaultOwner || setting.Repo != model.PromptTagTranslationDatabaseDefaultRepo { return model.PromptTagTranslationDatabaseSetting{}, safeMessageError{message: "第三方翻译词库第一版仅允许使用固定官方仓库"} }; return setting, nil }
-func promptTagTranslationDatabaseSettingForQuery() (model.PromptTagTranslationDatabaseSetting, error) { settings, err := repository.GetSettings(); if err != nil { return model.PromptTagTranslationDatabaseSetting{}, err }; return normalizePrivateSetting(settings.Private).PromptTagTranslationDatabase, nil }
+
+func promptTagDatabaseSettingForQuery() (model.PromptTagDatabaseSetting, error) {
+	settings, err := repository.GetSettings()
+	if err != nil {
+		return model.PromptTagDatabaseSetting{}, err
+	}
+	return normalizePrivateSetting(settings.Private).PromptTagDatabase, nil
+}
 
 func promptTagTranslationDatabaseSetting() (model.PromptTagTranslationDatabaseSetting, error) {
 	setting, err := promptTagTranslationDatabaseSettingForQuery()
@@ -323,7 +297,9 @@ func fetchPromptTagGitHubJSON(apiURL string, target any) error {
 func fetchPromptTagTranslationLatestRelease(setting model.PromptTagTranslationDatabaseSetting) (promptTagGitHubReleaseResponse, error) {
 	apiURL := fmt.Sprintf("%s/repos/%s/%s/releases/latest", promptTagGitHubAPIBase, url.PathEscape(setting.Owner), url.PathEscape(setting.Repo))
 	var payload promptTagGitHubReleaseResponse
-	if err := fetchPromptTagGitHubJSON(apiURL, &payload); err != nil { return payload, err }
+	if err := fetchPromptTagGitHubJSON(apiURL, &payload); err != nil {
+		return payload, err
+	}
 	return payload, nil
 }
 
@@ -332,29 +308,12 @@ func downloadPromptTagSQL(setting model.PromptTagDatabaseSetting, packagePath st
 	body, size, err := downloadPromptTagLimited(rawURL, "下载 WeiLin SQL 失败")
 	return string(body), size, err
 }
-func downloadPromptTagTranslationCSV(downloadURL string) ([]byte, int64, error) { return downloadPromptTagLimited(downloadURL, "下载第三方翻译 CSV 失败") }
-func downloadPromptTagLimited(downloadURL, prefix string) ([]byte, int64, error) {
-	request, err := http.NewRequest(http.MethodGet, downloadURL, nil); if err != nil { return nil, 0, err }
-	applyPromptTagGitHubHeaders(request, false)
-	response, err := promptTagHTTPClient.Do(request); if err != nil { return nil, 0, safeMessageError{message: prefix + "：网络不可达"} }
-	defer response.Body.Close()
-	if response.StatusCode >= http.StatusBadRequest { body, _ := io.ReadAll(response.Body); return nil, 0, safeMessageError{message: promptTagGitHubErrorMessage(prefix, response, body)} }
-	reader := io.LimitReader(response.Body, maxPromptTagSQLBytes+1)
-	body, err := io.ReadAll(reader); if err != nil { return nil, int64(len(body)), err }
-	if int64(len(body)) > maxPromptTagSQLBytes { return nil, int64(len(body)), safeMessageError{message: prefix + "：文件过大"} }
-	return body, int64(len(body)), nil
-}
-
-func fetchPromptTagTranslationLatestRelease(setting model.PromptTagTranslationDatabaseSetting) (promptTagGitHubReleaseResponse, error) {
-	apiURL := fmt.Sprintf("%s/repos/%s/%s/releases/latest", promptTagGitHubAPIBase, url.PathEscape(setting.Owner), url.PathEscape(setting.Repo))
-	var release promptTagGitHubReleaseResponse
-	if err := fetchPromptTagGitHubJSON(apiURL, &release); err != nil {
-		return release, err
-	}
-	return release, nil
-}
 
 func downloadPromptTagTranslationCSV(downloadURL string) ([]byte, int64, error) {
+	return downloadPromptTagLimited(downloadURL, "下载第三方翻译 CSV 失败")
+}
+
+func downloadPromptTagLimited(downloadURL, prefix string) ([]byte, int64, error) {
 	request, err := http.NewRequest(http.MethodGet, strings.TrimSpace(downloadURL), nil)
 	if err != nil {
 		return nil, 0, err
@@ -362,12 +321,12 @@ func downloadPromptTagTranslationCSV(downloadURL string) ([]byte, int64, error) 
 	applyPromptTagGitHubHeaders(request, false)
 	response, err := promptTagHTTPClient.Do(request)
 	if err != nil {
-		return nil, 0, safeMessageError{message: "下载第三方翻译词库失败：网络不可达"}
+		return nil, 0, safeMessageError{message: prefix + "：网络不可达"}
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= http.StatusBadRequest {
 		body, _ := io.ReadAll(response.Body)
-		return nil, 0, safeMessageError{message: promptTagGitHubErrorMessage("下载第三方翻译词库失败", response, body)}
+		return nil, 0, safeMessageError{message: promptTagGitHubErrorMessage(prefix, response, body)}
 	}
 	reader := io.LimitReader(response.Body, maxPromptTagSQLBytes+1)
 	body, err := io.ReadAll(reader)
@@ -375,7 +334,7 @@ func downloadPromptTagTranslationCSV(downloadURL string) ([]byte, int64, error) 
 		return nil, int64(len(body)), err
 	}
 	if int64(len(body)) > maxPromptTagSQLBytes {
-		return nil, int64(len(body)), safeMessageError{message: "下载第三方翻译词库失败：文件过大"}
+		return nil, int64(len(body)), safeMessageError{message: prefix + "：文件过大"}
 	}
 	return body, int64(len(body)), nil
 }
@@ -460,13 +419,6 @@ func applyPromptTagGitHubHeaders(request *http.Request, wantsJSON bool) {
 	if token := promptTagGitHubToken(); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	return flush()
-}
-func promptTagTranslationCSVColumns(header []string) map[string]int { result := map[string]int{}; for i, value := range header { result[strings.ToLower(strings.TrimSpace(value))] = i }; return result }
-func promptTagExternalTranslationFromRecord(record []string, columns map[string]int, setting model.PromptTagTranslationDatabaseSetting, asset model.PromptTagTranslationAsset, updatedAt string) model.PromptTagExternalTranslation {
-	field := func(name string) string { index := columns[name]; if index >= len(record) { return "" }; return strings.TrimSpace(record[index]) }
-	category, _ := strconv.ParseInt(field("category"), 10, 64); postCount, _ := strconv.ParseInt(field("post_count"), 10, 64); name := field("name")
-	return model.PromptTagExternalTranslation{Name: name, NormalizedName: strings.ReplaceAll(strings.ToLower(name), " ", "_"), Category: category, CNName: field("cn_name"), PostCount: postCount, SourceOwner: setting.Owner, SourceRepo: setting.Repo, ReleaseTag: asset.ReleaseTag, AssetName: asset.Name, UpdatedAt: updatedAt}
 }
 
 func promptTagGitHubToken() string {

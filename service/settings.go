@@ -176,19 +176,6 @@ func normalizePromptTagDatabaseSetting(setting model.PromptTagDatabaseSetting) m
 	return setting
 }
 
-func normalizePromptTagTranslationDatabaseSetting(setting model.PromptTagTranslationDatabaseSetting) model.PromptTagTranslationDatabaseSetting {
-	setting.Enabled = true
-	setting.Owner = strings.TrimSpace(setting.Owner)
-	if setting.Owner == "" {
-		setting.Owner = model.PromptTagTranslationDatabaseDefaultOwner
-	}
-	setting.Repo = strings.TrimSpace(setting.Repo)
-	if setting.Repo == "" {
-		setting.Repo = model.PromptTagTranslationDatabaseDefaultRepo
-	}
-	return setting
-}
-
 func promptTagPackageTypeFromPath(path string) model.PromptTagPackageType {
 	path = strings.TrimLeft(strings.ToLower(strings.TrimSpace(path)), "/")
 	if strings.HasPrefix(path, "danbooru/") {
