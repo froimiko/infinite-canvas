@@ -196,38 +196,6 @@ type PromptTagInstalledPackage struct {
 
 func (PromptTagInstalledPackage) TableName() string { return "prompt_tag_installed_packages" }
 
-// PromptTagExternalTranslation 保存管理员安装的第三方离线翻译词库。
-type PromptTagExternalTranslation struct {
-	Name           string `json:"name" gorm:"primaryKey;size:256"`
-	NormalizedName string `json:"normalizedName" gorm:"size:256;index"`
-	Category       int64  `json:"category" gorm:"index"`
-	CNName         string `json:"cnName" gorm:"column:cn_name;index"`
-	PostCount      int64  `json:"postCount" gorm:"index"`
-	SourceOwner    string `json:"sourceOwner" gorm:"size:128"`
-	SourceRepo     string `json:"sourceRepo" gorm:"size:256"`
-	ReleaseTag     string `json:"releaseTag" gorm:"size:128;index"`
-	AssetName      string `json:"assetName" gorm:"size:512;index"`
-	UpdatedAt      string `json:"updatedAt" gorm:"index"`
-}
-
-func (PromptTagExternalTranslation) TableName() string { return "prompt_tag_external_translations" }
-
-// PromptTagTranslationInstalledPackage 记录第三方翻译词库 CSV asset 安装状态。
-type PromptTagTranslationInstalledPackage struct {
-	AssetName   string `json:"assetName" gorm:"primaryKey;size:512"`
-	SourceOwner string `json:"sourceOwner" gorm:"size:128"`
-	SourceRepo  string `json:"sourceRepo" gorm:"size:256"`
-	ReleaseTag  string `json:"releaseTag" gorm:"size:128;index"`
-	Size        int64  `json:"size"`
-	InstalledAt string `json:"installedAt" gorm:"index"`
-	UpdatedAt   string `json:"updatedAt"`
-	Error       string `json:"error"`
-}
-
-func (PromptTagTranslationInstalledPackage) TableName() string {
-	return "prompt_tag_translation_installed_packages"
-}
-
 // PromptTagEntry 是前端 autocomplete/translation 使用的统一 tag 记录。
 type PromptTagEntry struct {
 	IDIndex     int64           `json:"idIndex"`
