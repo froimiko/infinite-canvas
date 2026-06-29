@@ -189,7 +189,7 @@ func PromptTagDatabaseTree(treePath string) ([]model.PromptTagPackage, error) {
 	treePath, err = normalizePromptTagTreePath(treePath); if err != nil { return nil, err }
 	apiURL := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s", promptTagGitHubAPIBase, url.PathEscape(setting.Owner), url.PathEscape(setting.Repo), escapePromptTagPath(treePath), url.QueryEscape(setting.Branch))
 	var payload []promptTagGitHubContentItem
-	if err := fetchPromptTagGitHubJSON(apiURL, &payload); err != nil { return nil, err }
+	if err := fetchPromptTagGitHubJSON(apiURL, &payload, "读取 WeiLin 数据库仓库失败"); err != nil { return nil, err }
 	packages := make([]model.PromptTagPackage, 0, len(payload))
 	for _, item := range payload {
 		pkg := model.PromptTagPackage{Type: promptTagPackageTypeFromPath(item.Path), Kind: item.Type, Path: strings.TrimLeft(item.Path, "/"), Name: item.Name, SHA: item.SHA, Size: item.Size, DownloadURL: item.DownloadURL}
@@ -283,21 +283,21 @@ func promptTagTranslationDatabaseSettingForQuery() (model.PromptTagTranslationDa
 	return normalizePrivateSetting(settings.Private).PromptTagTranslationDatabase, nil
 }
 
-func fetchPromptTagGitHubJSON(apiURL string, target any) error {
+func fetchPromptTagGitHubJSON(apiURL string, target any, failurePrefix string) error {
 	request, err := http.NewRequest(http.MethodGet, apiURL, nil); if err != nil { return err }
 	applyPromptTagGitHubHeaders(request, true)
-	response, err := promptTagHTTPClient.Do(request); if err != nil { return safeMessageError{message: "读取 WeiLin 数据库仓库失败：网络不可达"} }
+	response, err := promptTagHTTPClient.Do(request); if err != nil { return safeMessageError{message: failurePrefix + "：网络不可达"} }
 	defer response.Body.Close()
 	body, _ := io.ReadAll(response.Body)
-	if response.StatusCode >= http.StatusBadRequest { return safeMessageError{message: promptTagGitHubErrorMessage("读取 WeiLin 数据库仓库失败", response, body)} }
-	if err := json.Unmarshal(body, target); err != nil { return safeMessageError{message: "读取 WeiLin 数据库仓库失败：返回格式异常"} }
+	if response.StatusCode >= http.StatusBadRequest { return safeMessageError{message: promptTagGitHubErrorMessage(failurePrefix, response, body)} }
+	if err := json.Unmarshal(body, target); err != nil { return safeMessageError{message: failurePrefix + "：返回格式异常"} }
 	return nil
 }
 
 func fetchPromptTagTranslationLatestRelease(setting model.PromptTagTranslationDatabaseSetting) (promptTagGitHubReleaseResponse, error) {
 	apiURL := fmt.Sprintf("%s/repos/%s/%s/releases/latest", promptTagGitHubAPIBase, url.PathEscape(setting.Owner), url.PathEscape(setting.Repo))
 	var payload promptTagGitHubReleaseResponse
-	if err := fetchPromptTagGitHubJSON(apiURL, &payload); err != nil {
+	if err := fetchPromptTagGitHubJSON(apiURL, &payload, "读取第三方翻译词库 release 失败"); err != nil {
 		return payload, err
 	}
 	return payload, nil
