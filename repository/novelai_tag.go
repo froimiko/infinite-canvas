@@ -64,39 +64,6 @@ func PromptTagDatabaseStatus(setting model.PromptTagDatabaseSetting) (model.Prom
 	return status, nil
 }
 
-func PromptTagTranslationDatabaseStatus(setting model.PromptTagTranslationDatabaseSetting) (model.PromptTagTranslationDatabaseStatus, error) {
-	db, err := DB()
-	if err != nil {
-		return model.PromptTagTranslationDatabaseStatus{}, err
-	}
-	var translationCount int64
-	if err := db.Model(&model.PromptTagExternalTranslation{}).Count(&translationCount).Error; err != nil {
-		return model.PromptTagTranslationDatabaseStatus{}, err
-	}
-	packages, err := ListPromptTagTranslationInstalledPackages()
-	if err != nil {
-		return model.PromptTagTranslationDatabaseStatus{}, err
-	}
-	status := model.PromptTagTranslationDatabaseStatus{
-		Enabled:           setting.Enabled,
-		Owner:             setting.Owner,
-		Repo:              setting.Repo,
-		TranslationCount:  translationCount,
-		InstalledPackages: packages,
-	}
-	for _, item := range packages {
-		if strings.TrimSpace(item.Error) == "" && item.ReleaseTag > status.ReleaseTag {
-			status.ReleaseTag = item.ReleaseTag
-		}
-		if item.InstalledAt > status.LastInstalledAt {
-			status.LastInstalledAt = item.InstalledAt
-		}
-		if strings.TrimSpace(item.Error) != "" {
-			status.LastError = item.Error
-		}
-	}
-	return status, nil
-}
 
 // ListPromptTagInstalledPackages returns installed WeiLin SQL package records ordered by install time.
 func ListPromptTagInstalledPackages() ([]model.PromptTagInstalledPackage, error) {
@@ -253,21 +220,6 @@ func SavePromptTagInstalledPackage(item model.PromptTagInstalledPackage) (model.
 	return item, err
 }
 
-func SavePromptTagTranslationInstalledPackage(item model.PromptTagTranslationInstalledPackage) (model.PromptTagTranslationInstalledPackage, error) {
-	db, err := DB()
-	if err != nil {
-		return item, err
-	}
-	item.AssetName = strings.TrimSpace(item.AssetName)
-	if item.AssetName == "" {
-		return item, nil
-	}
-	err = db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "asset_name"}},
-		DoUpdates: clause.AssignmentColumns([]string{"source_owner", "source_repo", "release_tag", "size", "installed_at", "updated_at", "error"}),
-	}).Create(&item).Error
-	return item, err
-}
 
 func UpsertPromptTagExternalTranslations(items []model.PromptTagExternalTranslation) error {
 	if len(items) == 0 {
@@ -420,6 +372,11 @@ func searchPromptDanbooruTags(db *gorm.DB, keyword string, limit int) ([]model.P
 }
 
 func translatePromptTag(db *gorm.DB, tag string, externalEnabled bool) (string, error) {
+	variants := promptTagExternalNameVariants(tag)
+	if len(variants) == 0 {
+		return "", nil
+	}
+
 	var tagItem model.PromptTagTag
 	err := db.Where("text IN ?", variants).Order("id_index asc").First(&tagItem).Error
 	if err == nil && strings.TrimSpace(tagItem.Desc) != "" {
