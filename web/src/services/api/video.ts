@@ -46,6 +46,10 @@ function refreshRemoteUser(config: AiConfig) {
     if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
 }
 
+function remoteModelParams(config: AiConfig, model: string) {
+    return config.channelMode === "remote" ? { model: modelOptionName(model) } : undefined;
+}
+
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
     const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
     const delayMs = task.provider === "seedance" ? 5000 : 2500;
@@ -106,9 +110,9 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
 
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), params: remoteModelParams(config, task.model), signal: options?.signal })).data);
         if (video.status === "completed") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
+            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), params: remoteModelParams(config, task.model), responseType: "blob", signal: options?.signal });
             await assertVideoBlob(content.data);
             refreshRemoteUser(config);
             return { status: "completed", result: { blob: content.data } };
@@ -149,9 +153,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
 
 async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapSeedanceTask(
-            (await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, signal: options?.signal })).data,
-        );
+        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), params: remoteModelParams(config, task.model), signal: options?.signal })).data);
         if (state.status === "succeeded") {
             const url = state.content?.video_url;
             if (!url) return { status: "failed", error: "Seedance 任务成功但没有返回视频 URL" };
@@ -268,6 +270,7 @@ async function videoResultFromUrl(url: string, options?: RequestOptions): Promis
 
 function assertVideoConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置视频模型");
+    if (config.channelMode === "remote") return;
     if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
     if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
     if (config.apiFormat === "gemini") throw new Error("Gemini 调用格式暂不支持视频生成，请使用 OpenAI 格式渠道");

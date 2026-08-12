@@ -7,6 +7,7 @@ import { nanoid } from "nanoid";
 
 import { DEFAULT_NOVELAI_SETTINGS } from "@/components/novelai/novelai-constants";
 import { apiGet } from "@/services/api/request";
+import { useUserStore } from "@/stores/use-user-store";
 import type { AdminPublicSettings } from "@/services/api/admin";
 import type { NovelAISettings } from "@/types/image";
 
@@ -23,6 +24,7 @@ export type ModelChannel = {
 
 export type AiConfig = NovelAISettings & {
     channelMode: "remote" | "local";
+    showCloudModels: boolean;
     baseUrl: string;
     apiKey: string;
     apiFormat: ApiCallFormat;
@@ -64,11 +66,14 @@ export type WebdavSyncConfig = {
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
+export const CLOUD_CHANNEL_ID = "__cloud__";
+export const CLOUD_CHANNEL_NAME = "云端";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
+    showCloudModels: true,
     baseUrl: OPENAI_BASE_URL,
     apiKey: "",
     apiFormat: "openai",
@@ -189,6 +194,7 @@ function modelListKey(capability: ModelCapability) {
     return `${capability}Models` as "imageModels" | "videoModels" | "textModels" | "audioModels";
 }
 function isAiConfigReady(config: AiConfig, model: string) {
+    if (isCloudModelValue(model)) return Boolean(model.trim() && useUserStore.getState().token);
     if (config.channelMode === "remote") return Boolean(model.trim());
     const channel = resolveModelChannel(config, model);
     return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
@@ -249,6 +255,7 @@ export const useConfigStore = create<ConfigStore>()(
                     config: {
                         ...config,
                         channelMode: "local",
+                        showCloudModels: persistedConfig.showCloudModels !== false,
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
                         models,
@@ -280,11 +287,11 @@ function normalizeModelList(models: string[], channels: ModelChannel[]) {
     const allModelOptions = channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model)));
     return Array.from(new Set((models || []).map((model) => model.trim()).filter(Boolean)))
         .map((model) => normalizeModelOptionValue(model, channels))
-        .filter((model) => !allModelOptions.length || allModelOptions.includes(model) || !isChannelModelValue(model));
+        .filter((model) => isCloudModelValue(model) || !allModelOptions.length || allModelOptions.includes(model) || !isChannelModelValue(model));
 }
-function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null) {
+function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null, isLoggedIn = false) {
     const channelMode = modelChannel?.allowCustomChannel ? config.channelMode : "remote";
-    if (channelMode === "local" || !modelChannel) return { ...config, channelMode };
+    if (channelMode === "local" || !modelChannel) return withCloudModels(config, channelMode, modelChannel, isLoggedIn);
     const models = modelChannel.availableModels;
     const textModels = filterModelsByCapability(models, "text");
     const imageModels = filterModelsByCapability(models, "image");
@@ -312,6 +319,22 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
     };
 }
 
+function withCloudModels(config: AiConfig, channelMode: AiConfig["channelMode"], modelChannel: AdminPublicSettings["modelChannel"] | null, isLoggedIn: boolean) {
+    const cloudModels = isLoggedIn && config.showCloudModels ? modelChannel?.availableModels || [] : [];
+    if (!cloudModels.length) return { ...config, channelMode };
+    const options = cloudModels.map((model) => encodeChannelModel(CLOUD_CHANNEL_ID, model));
+    return {
+        ...config,
+        channelMode,
+        channels: [...config.channels, cloudModelChannel(cloudModels)],
+        models: uniqueModelOptions([...config.models, ...options]),
+        imageModels: uniqueModelOptions([...config.imageModels, ...filterModelsByCapability(options, "image")]),
+        videoModels: uniqueModelOptions([...config.videoModels, ...filterModelsByCapability(options, "video")]),
+        textModels: uniqueModelOptions([...config.textModels, ...filterModelsByCapability(options, "text")]),
+        audioModels: uniqueModelOptions([...config.audioModels, ...filterModelsByCapability(options, "audio")]),
+    };
+}
+
 function validDefault(model: string, models: string[]) {
     return models.includes(model) ? model : "";
 }
@@ -323,7 +346,8 @@ function preferredModel(models: string[], predicate: (model: string) => boolean)
 export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);
     const modelChannel = useConfigStore((state) => state.publicSettings?.modelChannel || null);
-    return useMemo(() => resolveEffectiveConfig(config, modelChannel), [config, modelChannel]);
+    const isLoggedIn = Boolean(useUserStore((state) => state.token));
+    return useMemo(() => resolveEffectiveConfig(config, modelChannel, isLoggedIn), [config, isLoggedIn, modelChannel]);
 }
 
 export function createModelChannel(channel?: Partial<ModelChannel>): ModelChannel {
@@ -346,6 +370,18 @@ export function isChannelModelValue(value: string) {
     return value.includes(CHANNEL_MODEL_SEPARATOR);
 }
 
+export function isCloudModelValue(value: string) {
+    return decodeChannelModel(value || "")?.channelId === CLOUD_CHANNEL_ID;
+}
+
+export function cloudModelChannel(models: string[]): ModelChannel {
+    return { id: CLOUD_CHANNEL_ID, name: CLOUD_CHANNEL_NAME, baseUrl: "", apiKey: "", apiFormat: "openai", models };
+}
+
+export function modelChannelMode(config: AiConfig, value: string): AiConfig["channelMode"] {
+    return isCloudModelValue(value) ? "remote" : config.channelMode;
+}
+
 export function decodeChannelModel(value: string) {
     const index = value.indexOf(CHANNEL_MODEL_SEPARATOR);
     if (index < 0) return null;
@@ -359,6 +395,7 @@ export function modelOptionName(value: string) {
 export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
+    if (decoded.channelId === CLOUD_CHANNEL_ID) return `${decoded.model}（${CLOUD_CHANNEL_NAME}）`;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
     return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
 }
@@ -370,27 +407,31 @@ export function modelOptionsFromChannels(channels: ModelChannel[]) {
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) {
     const model = (value || "").trim();
     if (!model) return "";
+    if (isCloudModelValue(model)) return model;
     const decoded = decodeChannelModel(model);
     if (decoded) {
         const channel = channels.find((item) => item.id === decoded.channelId);
         return channel && channel.models.includes(decoded.model) ? model : "";
     }
-    const channel = channels.find((item) => item.models.includes(decoded?.model || model)) || channels[0];
+    const channel = channels.find((item) => item.id !== CLOUD_CHANNEL_ID && item.models.includes(decoded?.model || model)) || channels[0];
     return channel && channel.models.includes(decoded?.model || model) ? encodeChannelModel(channel.id, decoded?.model || model) : model;
 }
 
 export function resolveModelChannel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     const model = decoded?.model || value;
-    const matched = decoded ? config.channels.find((channel) => channel.id === decoded.channelId) : config.channels.find((channel) => channel.models.includes(model));
+    if (decoded?.channelId === CLOUD_CHANNEL_ID) return cloudModelChannel([model]);
+    const matched = decoded ? config.channels.find((channel) => channel.id === decoded.channelId) : config.channels.find((channel) => channel.id !== CLOUD_CHANNEL_ID && channel.models.includes(model));
     return matched || config.channels[0] || createModelChannel({ id: "default", name: "默认渠道", baseUrl: config.baseUrl, apiKey: config.apiKey, apiFormat: config.apiFormat, models: config.models.map(modelOptionName) });
 }
 
 export function resolveModelRequestConfig(config: AiConfig, value: string) {
+    const model = modelOptionName(value || config.model);
+    if (isCloudModelValue(value)) return { ...config, channelMode: "remote" as const, model, baseUrl: "", apiKey: "", apiFormat: "openai" as const };
     const channel = resolveModelChannel(config, value);
     return {
         ...config,
-        model: modelOptionName(value || config.model),
+        model,
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
         apiFormat: channel.apiFormat,

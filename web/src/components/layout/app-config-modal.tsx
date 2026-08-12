@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
+import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Switch, Tabs } from "antd";
 import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
 import { useState } from "react";
 
@@ -13,6 +13,7 @@ import {
     createModelChannel,
     defaultBaseUrlForApiFormat,
     filterModelsByCapability,
+    isCloudModelValue,
     modelOptionLabel,
     modelOptionsFromChannels,
     normalizeModelOptionValue,
@@ -92,8 +93,9 @@ export function AppConfigModal() {
     const allowCustomChannel = modelChannel?.allowCustomChannel === true;
     const effectiveMode = allowCustomChannel ? config.channelMode : "remote";
     const isRemoteMode = effectiveMode === "remote";
-    const modelConfig = isRemoteMode ? effectiveConfig : config;
-    const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
+    const cloudModelCount = modelChannel?.availableModels.length || 0;
+    const modelConfig = effectiveConfig;
+    const modelOptions = effectiveConfig.models.map((model) => ({ label: modelOptionLabel(effectiveConfig, model), value: model }));
     const webdavReady = Boolean(webdav.url.trim());
 
     const saveConfig = (nextConfig: AiConfig) => {
@@ -179,7 +181,7 @@ export function AppConfigModal() {
     const updateCapabilityModels = (group: ModelGroup, models: string[]) => {
         const next = uniqueModels(models.map((model) => normalizeModelOptionValue(model, config.channels)).filter(Boolean));
         updateConfig(group.modelsKey, next);
-        if (!next.includes(config[group.modelKey])) updateConfig(group.modelKey, next[0] || "");
+        if (!isCloudModelValue(config[group.modelKey]) && !next.includes(config[group.modelKey])) updateConfig(group.modelKey, next[0] || "");
     };
 
     const testWebdav = async () => {
@@ -284,6 +286,15 @@ export function AppConfigModal() {
                             </Form>
                         ) : (
                             <Form layout="vertical" requiredMark={false}>
+                                {cloudModelCount ? (
+                                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                        <div className="min-w-0">
+                                            <div className="text-sm font-semibold">同时显示云端模型</div>
+                                            <div className="mt-1 text-xs leading-5 text-stone-500">开启后各处模型下拉会额外显示 {cloudModelCount} 个云端模型（标注“云端”），选中后由系统后台渠道转发并消耗算力点，需先登录。</div>
+                                        </div>
+                                        <Switch checked={config.showCloudModels} onChange={(checked) => updateConfig("showCloudModels", checked)} />
+                                    </div>
+                                ) : null}
                                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                     <div className="min-w-0 flex-1">
                                         <div className="flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100">
@@ -509,12 +520,12 @@ function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
 
 function keepOrSuggest(current: string[], suggested: string[], allModels: string[]) {
     const available = new Set(allModels);
-    const kept = uniqueModels(current).filter((model) => available.has(model));
+    const kept = uniqueModels(current).filter((model) => available.has(model) || isCloudModelValue(model));
     return kept.length ? kept : suggested;
 }
 
 function normalizeDefaultModel(value: string, options: string[]) {
-    if (options.includes(value)) return value;
+    if (isCloudModelValue(value) || options.includes(value)) return value;
     return options[0] || value;
 }
 

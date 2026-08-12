@@ -6,7 +6,7 @@ import { Button } from "antd";
 
 import { PromptBlockEditor } from "@/components/prompt-block-editor";
 import { ModelPicker } from "@/components/model-picker";
-import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, modelChannelMode, modelOptionName, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { normalizeNovelAISettings } from "@/lib/novelai-config";
@@ -43,7 +43,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
     const [negativePromptOpen, setNegativePromptOpen] = useState(Boolean(node.metadata?.negativePrompt?.trim()));
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
-    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1 });
+    const credits = requestCreditCost({ channelMode: modelChannelMode(config, config.model), modelCosts, model: modelOptionName(config.model), count: mode === "image" ? config.count : 1 });
 
     useEffect(() => {
         setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");

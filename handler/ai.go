@@ -22,6 +22,10 @@ func AIImagesEdits(w http.ResponseWriter, r *http.Request) {
 	proxyAIRequest(w, r, "/images/edits")
 }
 
+func AIResponses(w http.ResponseWriter, r *http.Request) {
+	proxyAIRequest(w, r, "/responses")
+}
+
 func AIChatCompletions(w http.ResponseWriter, r *http.Request) {
 	proxyAIRequest(w, r, "/chat/completions")
 }
@@ -161,7 +165,24 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 		}
 	}
 	w.WriteHeader(response.StatusCode)
-	_, _ = io.Copy(w, response.Body)
+	flushAIResponse(w, response.Body)
+}
+
+func flushAIResponse(w http.ResponseWriter, body io.Reader) {
+	controller := http.NewResponseController(w)
+	buffer := make([]byte, 32*1024)
+	for {
+		n, readErr := body.Read(buffer)
+		if n > 0 {
+			if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
+				return
+			}
+			_ = controller.Flush()
+		}
+		if readErr != nil {
+			return
+		}
+	}
 }
 
 func readAIRequest(r *http.Request) ([]byte, string, string, error) {
