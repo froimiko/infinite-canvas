@@ -7,7 +7,6 @@ import { Button } from "antd";
 
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { normalizeNovelAISettings } from "@/lib/novelai-config";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -33,8 +32,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
-    const novelAISettings = normalizeNovelAISettings(config);
-    const summary = novelAISettings.novelAIEnabled ? `NovelAI · ${novelAISettings.novelAISampler} · ${novelAISettings.novelAISteps} steps` : `${imageQualityLabel(quality)} · ${imageSizeLabel(activeSize)} · ${count} 张`;
+    const summary = `${imageQualityLabel(quality)} · ${imageSizeLabel(activeSize)} · ${count} 张`;
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
         onOpenChange?.(nextOpen);
@@ -122,7 +120,7 @@ function ImageSettingsPortal({
 
     return createPortal(
         <div ref={panelRef} className="canvas-image-settings-popover" style={style} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
+            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" showNovelAI={false} />
         </div>,
         document.body,
     );

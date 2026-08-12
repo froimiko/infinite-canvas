@@ -32,6 +32,7 @@ export function PromptBlockEditor({
     className = "",
     style,
     compact = false,
+    showTokenPanel = true,
     rows = 3,
     maxSuggestions = DEFAULT_MAX_SUGGESTIONS,
     onKeyDown,
@@ -453,41 +454,43 @@ export function PromptBlockEditor({
                     <SuggestionMenu suggestions={suggestions} isLoading={isSearching} selectedIndex={selectedSuggestionIndex} menuRef={suggestionsRef} menuStyle={menuStyle} onSelect={insertSuggestion} onHover={setSelectedSuggestionIndex} />
                 ) : null}
             </div>
-            <section className="prompt-block-editor__token-panel" aria-label="提示词块辅助操作区">
-                <div className="prompt-block-editor__token-panel-header">
-                    <span className="prompt-block-editor__token-panel-title">提示词块</span>
-                    <span className="prompt-block-editor__token-panel-hint">拖拽排序 / 单击编辑 / 双击禁用 / 单独复制</span>
-                </div>
-                {activeTokens.length ? (
-                    <div className="prompt-block-editor__token-list" aria-label="提示词块列表">
-                        {activeTokens.map((token, index) => (
-                            <PromptTokenItem
-                                key={token.id}
-                                token={token}
-                                index={index}
-                                disabled={disabled}
-                                isEditing={editingTokenId === token.id}
-                                editValue={editingTokenId === token.id ? editValue : ""}
-                                isDragging={dragIndex === index}
-                                isDragOver={dragOverIndex === index}
-                                onEditValueChange={setEditValue}
-                                onCommitEdit={commitEditToken}
-                                onCancelEdit={cancelEditToken}
-                                onEditKeyDown={handleEditKeyDown}
-                                onScheduleEdit={scheduleEditToken}
-                                onToggleDisabled={toggleTokenDisabled}
-                                onRemove={removeToken}
-                                onDragStart={handleDragStart}
-                                onDragOver={handleDragOver}
-                                onDrop={handleDrop}
-                                onDragEnd={handleDragEnd}
-                            />
-                        ))}
+            {showTokenPanel ? (
+                <section className="prompt-block-editor__token-panel" aria-label="提示词块辅助操作区">
+                    <div className="prompt-block-editor__token-panel-header">
+                        <span className="prompt-block-editor__token-panel-title">提示词块</span>
+                        <span className="prompt-block-editor__token-panel-hint">拖拽排序 / 单击编辑 / 双击禁用 / 单独复制</span>
                     </div>
-                ) : (
-                    <div className="prompt-block-editor__token-empty">在上方输入或粘贴提示词后，这里会生成可拖拽、可禁用、可单独复制的提示词块。</div>
-                )}
-            </section>
+                    {activeTokens.length ? (
+                        <div className="prompt-block-editor__token-list" aria-label="提示词块列表">
+                            {activeTokens.map((token, index) => (
+                                <PromptTokenItem
+                                    key={token.id}
+                                    token={token}
+                                    index={index}
+                                    disabled={disabled}
+                                    isEditing={editingTokenId === token.id}
+                                    editValue={editingTokenId === token.id ? editValue : ""}
+                                    isDragging={dragIndex === index}
+                                    isDragOver={dragOverIndex === index}
+                                    onEditValueChange={setEditValue}
+                                    onCommitEdit={commitEditToken}
+                                    onCancelEdit={cancelEditToken}
+                                    onEditKeyDown={handleEditKeyDown}
+                                    onScheduleEdit={scheduleEditToken}
+                                    onToggleDisabled={toggleTokenDisabled}
+                                    onRemove={removeToken}
+                                    onDragStart={handleDragStart}
+                                    onDragOver={handleDragOver}
+                                    onDrop={handleDrop}
+                                    onDragEnd={handleDragEnd}
+                                />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="prompt-block-editor__token-empty">在上方输入或粘贴提示词后，这里会生成可拖拽、可禁用、可单独复制的提示词块。</div>
+                    )}
+                </section>
+            ) : null}
             <input type="hidden" value={value || serializedValue} readOnly />
         </div>
     );

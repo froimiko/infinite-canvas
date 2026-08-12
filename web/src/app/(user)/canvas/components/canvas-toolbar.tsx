@@ -1,7 +1,7 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useRef, useState } from "react";
 import { Button, Segmented, Switch } from "antd";
-import { CircleDot, Eraser, FolderOpen, Grid2x2, Hand, Image as ImageIcon, Info, Moon, Music2, Palette, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
+import { CircleDot, Eraser, FolderOpen, Grid2x2, Hand, Image as ImageIcon, Info, Moon, Music2, Palette, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video, Wand2 } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -75,6 +75,18 @@ export function CanvasToolbar({
                     <Redo2 className="size-4.5" />
                 </ToolbarButton>
                 <Divider theme={theme} />
+                <span
+                    className="inline-flex"
+                    onMouseEnter={(event) => {
+                        setHovered("tool-novelai");
+                        setTipX(getTipX(wrapRef.current, event.currentTarget));
+                    }}
+                    onMouseLeave={() => setHovered(null)}
+                >
+                    <ToolbarButton id="tool-novelai" label="NovelAI 提示词（开发中）" disabled hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered}>
+                        <Wand2 className="size-4.5" />
+                    </ToolbarButton>
+                </span>
                 <ToolbarButton id="tool-text" label="文本" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddText}>
                     <Type className="size-4.5" />
                 </ToolbarButton>
@@ -276,6 +288,7 @@ function toolLabel(id: string) {
     if (id === "tool-hand") return "移动/选择";
     if (id === "tool-undo") return "撤销";
     if (id === "tool-redo") return "重做";
+    if (id === "tool-novelai") return "NovelAI 提示词（开发中）";
     if (id === "tool-text") return "文本";
     if (id === "tool-image") return "图片";
     if (id === "tool-video") return "视频";

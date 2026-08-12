@@ -29,8 +29,6 @@ export type CanvasNodeMetadata = Partial<NovelAISettings> & {
     composerContent?: string;
     prompt?: string;
     promptTokens?: PromptBlockToken[];
-    negativePrompt?: string;
-    negativePromptTokens?: PromptBlockToken[];
     status?: CanvasNodeStatus;
     errorDetails?: string;
     fontSize?: number;

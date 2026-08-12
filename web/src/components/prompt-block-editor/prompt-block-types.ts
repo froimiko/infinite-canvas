@@ -43,6 +43,7 @@ export type PromptBlockEditorProps = {
     className?: string;
     style?: CSSProperties;
     compact?: boolean;
+    showTokenPanel?: boolean;
     rows?: number;
     maxSuggestions?: number;
     onKeyDown?: (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void;

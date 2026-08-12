@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUp, ChevronDown, LoaderCircle, Square } from "lucide-react";
+import { ArrowUp, LoaderCircle, Square } from "lucide-react";
 import { Button } from "antd";
 
 import { PromptBlockEditor } from "@/components/prompt-block-editor";
@@ -41,22 +41,16 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
-    const [negativePromptOpen, setNegativePromptOpen] = useState(Boolean(node.metadata?.negativePrompt?.trim()));
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const credits = requestCreditCost({ channelMode: modelChannelMode(config, config.model), modelCosts, model: modelOptionName(config.model), count: mode === "image" ? config.count : 1 });
 
     useEffect(() => {
         setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");
-        setNegativePromptOpen(Boolean(node.metadata?.negativePrompt?.trim()));
     }, [isEditingExistingContent, node.id]);
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
         if (!isEditingExistingContent) onPromptChange(node.id, value);
-    };
-
-    const updateNegativePrompt = (value: string) => {
-        onConfigChange(node.id, { negativePrompt: value });
     };
 
     const selectLibraryPrompt = (value: string) => {
@@ -88,35 +82,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 mentionReferences={mentionReferences}
                 onSubmit={submit}
                 rows={3}
+                showTokenPanel={false}
                 className="thin-scrollbar rounded-xl text-sm"
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
-
-            {mode === "image" ? (
-                <div className="mt-2 rounded-xl border px-2 py-1.5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
-                    <button type="button" className="flex w-full items-center justify-between text-xs font-medium" style={{ color: theme.node.muted }} onClick={() => setNegativePromptOpen((open) => !open)}>
-                        <span>负面提示词（NAI）</span>
-                        <span className="inline-flex items-center gap-1">
-                            {node.metadata?.negativePrompt?.trim() ? "已填写" : "默认"}
-                            <ChevronDown className={`size-3 transition ${negativePromptOpen ? "rotate-180" : ""}`} />
-                        </span>
-                    </button>
-                    {negativePromptOpen ? (
-                        <PromptBlockEditor
-                            value={node.metadata?.negativePrompt || ""}
-                            onChange={updateNegativePrompt}
-                            tokens={node.metadata?.negativePromptTokens?.length ? node.metadata.negativePromptTokens : undefined}
-                            onTokensChange={(nextTokens) => onConfigChange(node.id, { negativePromptTokens: nextTokens })}
-                            compact
-                            rows={2}
-                            className="thin-scrollbar mt-1.5 rounded-lg text-xs"
-                            style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }}
-                            placeholder="留空使用默认负面提示词"
-                        />
-                    ) : null}
-                </div>
-            ) : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
