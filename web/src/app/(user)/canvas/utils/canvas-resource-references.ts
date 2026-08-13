@@ -51,7 +51,11 @@ function getContextResourceNodes(nodeId: string, nodes: CanvasNodeData[], connec
 }
 
 function getConnectedConfigResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
-    const configConnection = connections.find((connection) => connection.fromNodeId === nodeId && nodes.find((node) => node.id === connection.toNodeId)?.type === CanvasNodeType.Config);
+    const configConnection = connections.find((connection) => {
+        if (connection.fromNodeId !== nodeId) return false;
+        const targetType = nodes.find((node) => node.id === connection.toNodeId)?.type;
+        return targetType === CanvasNodeType.Config || targetType === CanvasNodeType.NovelAI;
+    });
     if (!configConnection) return [];
     return getContextResourceNodes(configConnection.toNodeId, nodes, connections).filter((node) => node.id !== nodeId);
 }

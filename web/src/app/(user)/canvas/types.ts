@@ -18,6 +18,7 @@ export enum CanvasNodeType {
     Config = "config",
     Video = "video",
     Audio = "audio",
+    NovelAI = "novelai",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
@@ -29,6 +30,11 @@ export type CanvasNodeMetadata = Partial<NovelAISettings> & {
     composerContent?: string;
     prompt?: string;
     promptTokens?: PromptBlockToken[];
+    naPositivePrompt?: string;
+    naNegativePrompt?: string;
+    naPromptTokens?: PromptBlockToken[];
+    naNegativePromptTokens?: PromptBlockToken[];
+    naSeedLocked?: boolean;
     status?: CanvasNodeStatus;
     errorDetails?: string;
     fontSize?: number;

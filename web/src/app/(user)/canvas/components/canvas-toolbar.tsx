@@ -18,6 +18,7 @@ export function CanvasToolbar({
     onAddAudio,
     onAddText,
     onAddConfig,
+    onAddNovelAI,
     onUndo,
     onRedo,
     onUpload,
@@ -38,6 +39,7 @@ export function CanvasToolbar({
     onAddAudio: () => void;
     onAddText: () => void;
     onAddConfig: () => void;
+    onAddNovelAI: () => void;
     onUndo: () => void;
     onRedo: () => void;
     onUpload: () => void;
@@ -75,18 +77,9 @@ export function CanvasToolbar({
                     <Redo2 className="size-4.5" />
                 </ToolbarButton>
                 <Divider theme={theme} />
-                <span
-                    className="inline-flex"
-                    onMouseEnter={(event) => {
-                        setHovered("tool-novelai");
-                        setTipX(getTipX(wrapRef.current, event.currentTarget));
-                    }}
-                    onMouseLeave={() => setHovered(null)}
-                >
-                    <ToolbarButton id="tool-novelai" label="NovelAI 提示词（开发中）" disabled hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered}>
-                        <Wand2 className="size-4.5" />
-                    </ToolbarButton>
-                </span>
+                <ToolbarButton id="tool-novelai" label="NovelAI" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddNovelAI}>
+                    <Wand2 className="size-4.5" />
+                </ToolbarButton>
                 <ToolbarButton id="tool-text" label="文本" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddText}>
                     <Type className="size-4.5" />
                 </ToolbarButton>
@@ -288,7 +281,7 @@ function toolLabel(id: string) {
     if (id === "tool-hand") return "移动/选择";
     if (id === "tool-undo") return "撤销";
     if (id === "tool-redo") return "重做";
-    if (id === "tool-novelai") return "NovelAI 提示词（开发中）";
+    if (id === "tool-novelai") return "NovelAI";
     if (id === "tool-text") return "文本";
     if (id === "tool-image") return "图片";
     if (id === "tool-video") return "视频";
