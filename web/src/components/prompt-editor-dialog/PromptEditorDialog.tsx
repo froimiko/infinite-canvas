@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { Eraser, Languages, Trash2, X } from "lucide-react";
+import { Eraser, Trash2, X } from "lucide-react";
 
 import { createPromptBlockToken, normalizePromptBlockTokens, parsePromptToTokens, serializeTokensToPrompt } from "@/components/prompt-block-editor/prompt-block-utils";
 import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
 import { searchTags, type TagSearchResult } from "@/services/tag-service";
 import { getCurrentWord, measureCaretPosition, replaceCurrentWord, type CurrentWord } from "./prompt-editor-utils";
+import { TranslateIcon } from "./translate-icon";
 import "./prompt-editor-dialog.css";
 
 const SEARCH_DEBOUNCE_MS = 160;
@@ -231,7 +232,7 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                     <X className="size-3.5" /> {showDeleteButtons ? "隐藏删除按钮" : "显示删除按钮"}
                 </button>
                 <button type="button" className="pe-button" disabled title="翻译功能待重做">
-                    <Languages className="size-3.5" /> 一键翻译Tag
+                    <TranslateIcon size={14} /> 一键翻译Tag
                 </button>
             </div>
 
@@ -260,9 +261,9 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                             {token.kind === "newline" ? null : (
                                 <div className="pe-token__translation">
                                     {/* TODO: 翻译功能待重做，此处仅保留入口与占位 */}
-                                    <span className="pe-token__translate-icon" title="翻译（待重做）">
-                                        A文
-                                    </span>
+                                    <button type="button" className="pe-token__translate-icon" title="翻译（待重做）" aria-label="翻译">
+                                        <TranslateIcon />
+                                    </button>
                                     <span className="pe-token__translation-text">{token.translation || ""}</span>
                                 </div>
                             )}
