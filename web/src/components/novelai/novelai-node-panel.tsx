@@ -4,12 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { LoaderCircle, Play, Settings2, SlidersHorizontal, Square } from "lucide-react";
 
+import { ModelPicker } from "@/components/model-picker";
 import { PromptEditorDialog, type PromptEditorTarget } from "@/components/prompt-editor-dialog";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { NOVELAI_MODELS } from "./novelai-constants";
 import { NovelAIParamsPanel } from "./novelai-params-panel";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/app/(user)/canvas/types";
+
+const PANEL_WIDTH = 300;
+const PANEL_GAP = 8;
+const SCREEN_MARGIN = 12;
 
 type NovelAINodePanelProps = {
     node: CanvasNodeData;
@@ -23,6 +28,8 @@ type EditorState = { field: "positive" | "negative"; target: PromptEditorTarget 
 
 export function NovelAINodePanel({ node, isRunning, onConfigChange, onGenerate, onStop }: NovelAINodePanelProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const globalConfig = useEffectiveConfig();
+    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const metadata = node.metadata || {};
     const [paramsOpen, setParamsOpen] = useState(false);
     const [paramsRect, setParamsRect] = useState<DOMRect | null>(null);
@@ -100,19 +107,16 @@ export function NovelAINodePanel({ node, isRunning, onConfigChange, onGenerate, 
                 打开提示词编辑器
             </button>
 
-            <div className="flex items-center gap-2" onMouseDown={(event) => event.stopPropagation()}>
-                <select
-                    className="h-9 min-w-0 flex-1 cursor-pointer rounded-lg border px-2 text-xs outline-none"
-                    style={fieldStyle}
-                    value={metadata.novelAIModel || NOVELAI_MODELS[0].id}
-                    onChange={(event) => onConfigChange(node.id, { novelAIModel: event.target.value })}
-                >
-                    {NOVELAI_MODELS.map((model) => (
-                        <option key={model.id} value={model.id}>
-                            {model.name}
-                        </option>
-                    ))}
-                </select>
+            <div className="flex min-w-0 items-center gap-2" onMouseDown={(event) => event.stopPropagation()}>
+                <ModelPicker
+                    className="canvas-compact-control h-9 min-w-0 flex-1"
+                    config={globalConfig}
+                    value={metadata.model || globalConfig.imageModel}
+                    capability="image"
+                    onChange={(model) => onConfigChange(node.id, { novelAIModel: model, model })}
+                    onMissingConfig={() => openConfigDialog(true)}
+                    fullWidth
+                />
                 <button ref={paramsButtonRef} type="button" className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-xs" style={fieldStyle} onClick={() => setParamsOpen((current) => !current)}>
                     <Settings2 className="size-3.5" />
                     高级参数
@@ -139,8 +143,8 @@ export function NovelAINodePanel({ node, isRunning, onConfigChange, onGenerate, 
 
             {paramsOpen && paramsRect
                 ? createPortal(
-                      <div ref={paramsPanelRef} style={{ position: "fixed", zIndex: 1300, left: Math.max(12, Math.min(window.innerWidth - 312, paramsRect.left)), top: Math.min(window.innerHeight - 24, paramsRect.bottom + 8) }}>
-                          <NovelAIParamsPanel metadata={metadata} onChange={(patch) => onConfigChange(node.id, patch)} />
+                      <div ref={paramsPanelRef} style={paramsPanelStyle(paramsRect)}>
+                          <NovelAIParamsPanel metadata={metadata} theme={theme} onChange={(patch) => onConfigChange(node.id, patch)} />
                       </div>,
                       document.body,
                   )
@@ -151,11 +155,26 @@ export function NovelAINodePanel({ node, isRunning, onConfigChange, onGenerate, 
                     open
                     target={editor.target}
                     onClose={() => setEditor(null)}
-                    onSubmit={(value, tokens) =>
-                        onConfigChange(node.id, editor.field === "positive" ? { naPositivePrompt: value, naPromptTokens: tokens } : { naNegativePrompt: value, naNegativePromptTokens: tokens })
-                    }
+                    onSubmit={(value, tokens) => onConfigChange(node.id, editor.field === "positive" ? { naPositivePrompt: value, naPromptTokens: tokens } : { naNegativePrompt: value, naNegativePromptTokens: tokens })}
                 />
             ) : null}
         </div>
     );
+}
+
+/** 依据按钮位置选择上/下展开方向，并把可视高度限制在剩余空间内，避免超出屏幕。 */
+function paramsPanelStyle(rect: DOMRect) {
+    const spaceBelow = window.innerHeight - rect.bottom - PANEL_GAP - SCREEN_MARGIN;
+    const spaceAbove = rect.top - PANEL_GAP - SCREEN_MARGIN;
+    const placeAbove = spaceBelow < 320 && spaceAbove > spaceBelow;
+    const left = Math.max(SCREEN_MARGIN, Math.min(window.innerWidth - PANEL_WIDTH - SCREEN_MARGIN, rect.left));
+    return {
+        position: "fixed",
+        zIndex: 1300,
+        left,
+        maxHeight: Math.max(240, placeAbove ? spaceAbove : spaceBelow),
+        overflowY: "auto",
+        borderRadius: 14,
+        ...(placeAbove ? { bottom: window.innerHeight - rect.top + PANEL_GAP } : { top: rect.bottom + PANEL_GAP }),
+    } as const;
 }

@@ -41,7 +41,8 @@ export const NODE_SPECS = {
     },
     [CanvasNodeType.NovelAI]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.NovelAI],
-        metadata: { ...DEFAULT_NOVELAI_SETTINGS, novelAIEnabled: true, status: "idle", generationMode: "image", size: "832x1216", naPositivePrompt: "", naNegativePrompt: "" },
+        // novelAIModel 留空，模型由 ModelPicker 从用户配置里选，避免预设名不在可选列表中。
+        metadata: { ...DEFAULT_NOVELAI_SETTINGS, novelAIModel: "", novelAIEnabled: true, status: "idle", generationMode: "image", size: "832x1216", count: 1, naPositivePrompt: "", naNegativePrompt: "" },
     },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;
 

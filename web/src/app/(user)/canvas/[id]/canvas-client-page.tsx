@@ -2752,7 +2752,7 @@ function InfiniteCanvasPage() {
                             resourceLabel={resourceReferenceByNodeId.get(node.id)}
                             mentionReferences={mentionReferencesByNodeId.get(node.id) || []}
                             renderPanel={(panelNode) =>
-                                panelNode.type === CanvasNodeType.Config ? (
+                                panelNode.type === CanvasNodeType.NovelAI ? null : panelNode.type === CanvasNodeType.Config ? (
                                     <CanvasConfigComposer
                                         value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
                                         inputs={configInputsById.get(panelNode.id) || []}
