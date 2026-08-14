@@ -4,7 +4,8 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    width: min(960px, calc(100vw - 48px));
+    min-width: 520px;
+    min-height: 400px;
     padding: 0 0 14px;
     border: 1px solid #3f3f46;
     border-radius: 10px;
@@ -51,12 +52,14 @@
 
 .pe-dialog__editor {
     position: relative;
+    flex: 0 0 40%;
+    min-height: 120px;
     margin: 0 14px;
 }
 
 .pe-dialog__textarea {
     width: 100%;
-    height: 150px;
+    height: 100%;
     padding: 12px;
     border: 1px solid #3f3f46;
     border-radius: 8px;
@@ -64,7 +67,7 @@
     color: #e4e4e7;
     font-size: 13px;
     line-height: 1.6;
-    resize: vertical;
+    resize: none;
     outline: none;
 }
 
@@ -134,8 +137,15 @@
 .pe-dialog__actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
     padding: 0 14px;
+}
+
+.pe-dialog__hint {
+    color: #71717a;
+    font-size: 11px;
+    user-select: none;
 }
 
 .pe-button {
@@ -169,10 +179,11 @@
 
 .pe-tokens {
     display: flex;
+    flex: 1;
     flex-wrap: wrap;
+    align-content: flex-start;
     gap: 8px;
-    min-height: 88px;
-    max-height: 240px;
+    min-height: 80px;
     overflow-y: auto;
     margin: 0 14px;
     padding: 10px;
@@ -205,6 +216,11 @@
     opacity: 0.5;
 }
 
+.pe-token.is-editing {
+    cursor: default;
+    outline: 1px solid #6366f1;
+}
+
 .pe-token.is-disabled {
     position: relative;
     border: 1px solid #ef4444;
@@ -226,7 +242,31 @@
 }
 
 .pe-token__text {
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
     font-size: 13px;
+    font-family: inherit;
+    cursor: text;
+}
+
+.pe-token__text:hover {
+    text-decoration: underline;
+    text-decoration-style: dotted;
+}
+
+.pe-token__edit {
+    width: 108px;
+    padding: 0 4px;
+    border: none;
+    border-radius: 3px;
+    background: #fff7ed;
+    color: #1c1917;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    user-select: text;
 }
 
 .pe-token__remove {
@@ -270,4 +310,35 @@
     justify-content: flex-end;
     gap: 8px;
     padding: 0 14px;
+}
+
+.pe-resize {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    z-index: 2;
+}
+
+.pe-resize--nw {
+    top: -3px;
+    left: -3px;
+    cursor: nwse-resize;
+}
+
+.pe-resize--ne {
+    top: -3px;
+    right: -3px;
+    cursor: nesw-resize;
+}
+
+.pe-resize--sw {
+    bottom: -3px;
+    left: -3px;
+    cursor: nesw-resize;
+}
+
+.pe-resize--se {
+    right: -3px;
+    bottom: -3px;
+    cursor: nwse-resize;
 }

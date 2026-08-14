@@ -14,6 +14,13 @@ import "./prompt-editor-dialog.css";
 
 const SEARCH_DEBOUNCE_MS = 160;
 const MAX_SUGGESTIONS = 12;
+/** 单击进入编辑前的等待时间，用于让双击（禁用）先取消它。 */
+const CLICK_EDIT_DELAY_MS = 180;
+const MIN_WIDTH = 520;
+const MIN_HEIGHT = 400;
+const RESIZE_CORNERS = ["nw", "ne", "sw", "se"] as const;
+
+type ResizeCorner = (typeof RESIZE_CORNERS)[number];
 
 export type PromptEditorTarget = {
     title: string;
@@ -29,6 +36,9 @@ type PromptEditorDialogProps = {
     onClose: () => void;
 };
 
+type DragState = { x: number; y: number };
+type ResizeState = { corner: ResizeCorner; startX: number; startY: number; startWidth: number; startHeight: number; startLeft: number; startTop: number };
+
 export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器", target, onSubmit, onClose }: PromptEditorDialogProps) {
     const [tokens, setTokens] = useState<PromptBlockToken[]>([]);
     const [draft, setDraft] = useState("");
@@ -38,13 +48,19 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
     const [menuStyle, setMenuStyle] = useState<CSSProperties>({ left: 0, top: 0 });
     const [showDeleteButtons, setShowDeleteButtons] = useState(true);
     const [position, setPosition] = useState({ x: 0, y: 0 });
+    const [size, setSize] = useState({ width: 960, height: 560 });
     const [dragging, setDragging] = useState(false);
+    const [resizing, setResizing] = useState(false);
     const [dragIndex, setDragIndex] = useState<number | null>(null);
+    const [editingTokenId, setEditingTokenId] = useState<string | null>(null);
+    const [editValue, setEditValue] = useState("");
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const wrapRef = useRef<HTMLDivElement>(null);
-    const dragOffsetRef = useRef<{ x: number; y: number } | null>(null);
+    const dragOffsetRef = useRef<DragState | null>(null);
+    const resizeRef = useRef<ResizeState | null>(null);
     const currentWordRef = useRef<CurrentWord>({ query: "", replaceStart: 0, replaceEnd: 0 });
     const searchIdRef = useRef(0);
+    const editTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const tokenCount = useMemo(() => tokens.filter((token) => !token.disabled && token.kind !== "newline").length, [tokens]);
 
@@ -54,8 +70,18 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
         setTokens(initial);
         setDraft(serializeTokensToPrompt(initial));
         setShowSuggestions(false);
-        setPosition({ x: Math.max(24, window.innerWidth / 2 - 480), y: Math.max(24, window.innerHeight / 2 - 260) });
+        setEditingTokenId(null);
+        const width = Math.min(960, window.innerWidth - 48);
+        const height = Math.min(560, window.innerHeight - 48);
+        setSize({ width, height });
+        setPosition({ x: Math.max(24, (window.innerWidth - width) / 2), y: Math.max(24, (window.innerHeight - height) / 2) });
     }, [open, target.tokens, target.value]);
+
+    useEffect(() => {
+        return () => {
+            if (editTimerRef.current) clearTimeout(editTimerRef.current);
+        };
+    }, []);
 
     const syncCaretMenu = useCallback(() => {
         const textarea = textareaRef.current;
@@ -104,6 +130,35 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
             window.removeEventListener("pointerup", stop);
         };
     }, [dragging]);
+
+    useEffect(() => {
+        if (!resizing) return;
+        const move = (event: PointerEvent) => {
+            const state = resizeRef.current;
+            if (!state) return;
+            const deltaX = event.clientX - state.startX;
+            const deltaY = event.clientY - state.startY;
+            const pullLeft = state.corner === "nw" || state.corner === "sw";
+            const pullTop = state.corner === "nw" || state.corner === "ne";
+            const width = Math.max(MIN_WIDTH, state.startWidth + (pullLeft ? -deltaX : deltaX));
+            const height = Math.max(MIN_HEIGHT, state.startHeight + (pullTop ? -deltaY : deltaY));
+            setSize({ width, height });
+            setPosition({
+                x: pullLeft ? state.startLeft + (state.startWidth - width) : state.startLeft,
+                y: pullTop ? state.startTop + (state.startHeight - height) : state.startTop,
+            });
+        };
+        const stop = () => {
+            resizeRef.current = null;
+            setResizing(false);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", stop);
+        return () => {
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", stop);
+        };
+    }, [resizing]);
 
     if (!open || typeof document === "undefined") return null;
 
@@ -178,13 +233,52 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
         setDragIndex(null);
     };
 
+    /** 单击 tag 文本延迟进入编辑，双击会先清掉定时器改为切换禁用。 */
+    const scheduleEditToken = (token: PromptBlockToken) => {
+        if (token.kind === "newline") return;
+        if (editTimerRef.current) clearTimeout(editTimerRef.current);
+        editTimerRef.current = setTimeout(() => {
+            setEditingTokenId(token.id);
+            setEditValue(token.text);
+        }, CLICK_EDIT_DELAY_MS);
+    };
+
+    const toggleTokenDisabled = (index: number) => {
+        if (editTimerRef.current) clearTimeout(editTimerRef.current);
+        setEditingTokenId(null);
+        commitTokens(tokens.map((item, itemIndex) => (itemIndex === index ? { ...item, disabled: !item.disabled } : item)));
+    };
+
+    const finishEditToken = () => {
+        if (!editingTokenId) return;
+        const text = editValue.trim();
+        const next = text
+            ? tokens.map((token) => (token.id === editingTokenId && token.text.trim() !== text ? createPromptBlockToken(text, { id: token.id, disabled: token.disabled }) : token))
+            : tokens.filter((token) => token.id !== editingTokenId);
+        setEditingTokenId(null);
+        setEditValue("");
+        commitTokens(next);
+    };
+
     const startWindowDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
         dragOffsetRef.current = { x: event.clientX - position.x, y: event.clientY - position.y };
         setDragging(true);
     };
 
+    const startResize = (corner: ResizeCorner, event: ReactPointerEvent<HTMLDivElement>) => {
+        event.stopPropagation();
+        resizeRef.current = { corner, startX: event.clientX, startY: event.clientY, startWidth: size.width, startHeight: size.height, startLeft: position.x, startTop: position.y };
+        setResizing(true);
+    };
+
     return createPortal(
-        <div className="pe-dialog" style={{ left: position.x, top: position.y }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+        <div
+            className="pe-dialog"
+            style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+        >
             <div className="pe-dialog__header" onPointerDown={startWindowDrag}>
                 <span className="pe-dialog__title">
                     {title} · {target.title}
@@ -234,6 +328,7 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                 <button type="button" className="pe-button" disabled title="翻译功能待重做">
                     <TranslateIcon size={14} /> 一键翻译Tag
                 </button>
+                <span className="pe-dialog__hint">单击 Tag 文字编辑 · 双击屏蔽 · 拖动排序</span>
             </div>
 
             <div className="pe-tokens">
@@ -241,18 +336,37 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                     tokens.map((token, index) => (
                         <div
                             key={token.id}
-                            className={`pe-token ${token.disabled ? "is-disabled" : ""} ${dragIndex === index ? "is-dragging" : ""}`}
-                            draggable
+                            className={`pe-token ${token.disabled ? "is-disabled" : ""} ${dragIndex === index ? "is-dragging" : ""} ${editingTokenId === token.id ? "is-editing" : ""}`}
+                            draggable={editingTokenId !== token.id}
                             onDragStart={() => setDragIndex(index)}
                             onDragOver={(event) => event.preventDefault()}
                             onDrop={(event) => handleDrop(index, event)}
                             onDragEnd={() => setDragIndex(null)}
-                            onDoubleClick={() => commitTokens(tokens.map((item, itemIndex) => (itemIndex === index ? { ...item, disabled: !item.disabled } : item)))}
-                            title="双击禁用/启用，拖拽排序"
+                            onDoubleClick={() => toggleTokenDisabled(index)}
                         >
                             <div className="pe-token__head">
-                                <span className="pe-token__text">{token.kind === "newline" ? "↵" : token.text}</span>
-                                {showDeleteButtons ? (
+                                {editingTokenId === token.id ? (
+                                    <input
+                                        className="pe-token__edit"
+                                        value={editValue}
+                                        autoFocus
+                                        onChange={(event) => setEditValue(event.target.value)}
+                                        onBlur={finishEditToken}
+                                        onKeyDown={(event) => {
+                                            event.stopPropagation();
+                                            if (event.key === "Enter") finishEditToken();
+                                            if (event.key === "Escape") {
+                                                setEditingTokenId(null);
+                                                setEditValue("");
+                                            }
+                                        }}
+                                    />
+                                ) : (
+                                    <button type="button" className="pe-token__text" title="单击编辑，双击屏蔽" onClick={() => scheduleEditToken(token)}>
+                                        {token.kind === "newline" ? "↵" : token.text}
+                                    </button>
+                                )}
+                                {showDeleteButtons && editingTokenId !== token.id ? (
                                     <button type="button" className="pe-token__remove" onClick={() => commitTokens(tokens.filter((_, itemIndex) => itemIndex !== index))} aria-label={`删除 ${token.text}`}>
                                         ×
                                     </button>
@@ -290,6 +404,10 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                     应用
                 </button>
             </div>
+
+            {RESIZE_CORNERS.map((corner) => (
+                <div key={corner} className={`pe-resize pe-resize--${corner}`} onPointerDown={(event) => startResize(corner, event)} />
+            ))}
         </div>,
         document.body,
     );

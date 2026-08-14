@@ -15,7 +15,7 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Config]: { width: 340, height: 240, title: "生成配置" },
     [CanvasNodeType.Video]: { width: 420, height: 236, title: "Video" },
     [CanvasNodeType.Audio]: { width: 340, height: 120, title: "Audio" },
-    [CanvasNodeType.NovelAI]: { width: 380, height: 320, title: "NovelAI" },
+    [CanvasNodeType.NovelAI]: { width: 380, height: 360, title: "NovelAI" },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
 export const NODE_SPECS = {

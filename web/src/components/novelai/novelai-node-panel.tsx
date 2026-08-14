@@ -96,16 +96,26 @@ export function NovelAINodePanel({ node, isRunning, onConfigChange, onGenerate, 
                 />
             </label>
 
-            <button
-                type="button"
-                className="flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border text-xs"
-                style={fieldStyle}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={() => setEditor({ field: "positive", target: { title: "正面提示词", value: metadata.naPositivePrompt || "", tokens: metadata.naPromptTokens } })}
-            >
-                <SlidersHorizontal className="size-3.5" />
-                打开提示词编辑器
-            </button>
+            <div className="flex min-w-0 items-center gap-2" onMouseDown={(event) => event.stopPropagation()}>
+                <button
+                    type="button"
+                    className="flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs"
+                    style={fieldStyle}
+                    onClick={() => setEditor({ field: "positive", target: { title: "正面提示词", value: metadata.naPositivePrompt || "", tokens: metadata.naPromptTokens } })}
+                >
+                    <SlidersHorizontal className="size-3.5 shrink-0" />
+                    <span className="truncate">正面提示词编辑器</span>
+                </button>
+                <button
+                    type="button"
+                    className="flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs"
+                    style={fieldStyle}
+                    onClick={() => setEditor({ field: "negative", target: { title: "负面提示词", value: metadata.naNegativePrompt || "", tokens: metadata.naNegativePromptTokens } })}
+                >
+                    <SlidersHorizontal className="size-3.5 shrink-0" />
+                    <span className="truncate">负面提示词编辑器</span>
+                </button>
+            </div>
 
             <div className="flex min-w-0 items-center gap-2" onMouseDown={(event) => event.stopPropagation()}>
                 <ModelPicker
