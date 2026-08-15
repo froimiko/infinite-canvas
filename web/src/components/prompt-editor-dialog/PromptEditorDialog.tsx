@@ -8,6 +8,8 @@ import { Eraser, Trash2, X } from "lucide-react";
 import { createPromptBlockToken, normalizePromptBlockTokens, parsePromptToTokens, serializeTokensToPrompt } from "@/components/prompt-block-editor/prompt-block-utils";
 import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
 import { searchTags, type TagSearchResult } from "@/services/tag-service";
+import { networkTranslatePromptText } from "@/services/api/prompt-tags";
+import { useUserStore } from "@/stores/use-user-store";
 import { getCurrentWord, measureCaretPosition, replaceCurrentWord, type CurrentWord } from "./prompt-editor-utils";
 import { TranslateIcon } from "./translate-icon";
 import "./prompt-editor-dialog.css";
@@ -19,6 +21,17 @@ const CLICK_EDIT_DELAY_MS = 180;
 const MIN_WIDTH = 520;
 const MIN_HEIGHT = 400;
 const RESIZE_CORNERS = ["nw", "ne", "sw", "se"] as const;
+/** 与后端一致的单次批量上限，超出会拆成多批。 */
+const TRANSLATE_BATCH_SIZE = 50;
+
+/** 只翻译缺译名、译名等于原文或译名仍是英文的普通 Tag。 */
+function needsTranslation(token: PromptBlockToken) {
+    if (token.kind === "newline" || token.kind === "lora" || token.kind === "mention") return false;
+    const text = token.text.trim();
+    if (!text) return false;
+    const translation = token.translation?.trim();
+    return !translation || translation === text || /[A-Za-z]/.test(translation);
+}
 
 type ResizeCorner = (typeof RESIZE_CORNERS)[number];
 
@@ -54,6 +67,11 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [editingTokenId, setEditingTokenId] = useState<string | null>(null);
     const [editValue, setEditValue] = useState("");
+    const [translatingTokenIds, setTranslatingTokenIds] = useState<string[]>([]);
+    const [isTranslatingAll, setIsTranslatingAll] = useState(false);
+    const [translateError, setTranslateError] = useState("");
+    const authToken = useUserStore((state) => state.token);
+    const translateRequestRef = useRef(0);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const wrapRef = useRef<HTMLDivElement>(null);
     const dragOffsetRef = useRef<DragState | null>(null);
@@ -168,6 +186,77 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
         setDraft(serializeTokensToPrompt(normalized));
     };
 
+    /** 按 token id 回填译名，源文本被改过的 Tag 会被跳过，避免异步结果错位。 */
+    const applyTranslations = (results: Map<string, { text: string; translation: string }>) => {
+        setTokens((current) => {
+            const next = current.map((item) => {
+                const result = results.get(item.id);
+                return result && result.text === item.text ? createPromptBlockToken(item.text, { ...item, translation: result.translation }) : item;
+            });
+            return normalizePromptBlockTokens(next);
+        });
+    };
+
+    const translateToken = async (target: PromptBlockToken) => {
+        if (!authToken || translatingTokenIds.includes(target.id)) return;
+        const requestId = (translateRequestRef.current += 1);
+        setTranslatingTokenIds((current) => [...current, target.id]);
+        setTranslateError("");
+        try {
+            const translation = await networkTranslatePromptText(target.text, authToken);
+            if (translateRequestRef.current !== requestId) return;
+            if (translation.trim()) applyTranslations(new Map([[target.id, { text: target.text, translation: translation.trim() }]]));
+        } catch (error) {
+            setTranslateError(error instanceof Error ? error.message : "翻译失败");
+        } finally {
+            setTranslatingTokenIds((current) => current.filter((id) => id !== target.id));
+        }
+    };
+
+    const translateAllTokens = async () => {
+        if (!authToken || isTranslatingAll) return;
+        const pending = tokens.filter(needsTranslation);
+        if (!pending.length) return;
+        const requestId = (translateRequestRef.current += 1);
+        setIsTranslatingAll(true);
+        setTranslateError("");
+        const results = new Map<string, { text: string; translation: string }>();
+        let lastError = "";
+        try {
+            for (let start = 0; start < pending.length; start += TRANSLATE_BATCH_SIZE) {
+                const batch = pending.slice(start, start + TRANSLATE_BATCH_SIZE);
+                let lines: string[] = [];
+                try {
+                    lines = (await networkTranslatePromptText(batch.map((item) => item.text).join("\n"), authToken)).split("\n");
+                } catch (error) {
+                    lastError = error instanceof Error ? error.message : "翻译失败";
+                }
+                if (translateRequestRef.current !== requestId) return;
+                if (lines.length === batch.length) {
+                    batch.forEach((item, index) => {
+                        const translation = lines[index]?.trim();
+                        if (translation) results.set(item.id, { text: item.text, translation });
+                    });
+                    continue;
+                }
+                // 行数对不上或整批失败时逐条重试，已成功的结果不受影响。
+                for (const item of batch) {
+                    try {
+                        const translation = (await networkTranslatePromptText(item.text, authToken)).trim();
+                        if (translateRequestRef.current !== requestId) return;
+                        if (translation) results.set(item.id, { text: item.text, translation });
+                    } catch (error) {
+                        lastError = error instanceof Error ? error.message : "翻译失败";
+                    }
+                }
+            }
+            if (results.size) applyTranslations(results);
+            if (lastError) setTranslateError(results.size ? `${lastError}（部分 Tag 未翻译）` : lastError);
+        } finally {
+            if (translateRequestRef.current === requestId) setIsTranslatingAll(false);
+        }
+    };
+
     const handleDraftChange = (value: string, caret: number) => {
         setDraft(value);
         currentWordRef.current = getCurrentWord(value, caret);
@@ -252,9 +341,7 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
     const finishEditToken = () => {
         if (!editingTokenId) return;
         const text = editValue.trim();
-        const next = text
-            ? tokens.map((token) => (token.id === editingTokenId && token.text.trim() !== text ? createPromptBlockToken(text, { id: token.id, disabled: token.disabled }) : token))
-            : tokens.filter((token) => token.id !== editingTokenId);
+        const next = text ? tokens.map((token) => (token.id === editingTokenId && token.text.trim() !== text ? createPromptBlockToken(text, { id: token.id, disabled: token.disabled }) : token)) : tokens.filter((token) => token.id !== editingTokenId);
         setEditingTokenId(null);
         setEditValue("");
         commitTokens(next);
@@ -325,10 +412,11 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                 <button type="button" className="pe-button" onClick={() => setShowDeleteButtons((current) => !current)}>
                     <X className="size-3.5" /> {showDeleteButtons ? "隐藏删除按钮" : "显示删除按钮"}
                 </button>
-                <button type="button" className="pe-button" disabled title="翻译功能待重做">
-                    <TranslateIcon size={14} /> 一键翻译Tag
+                <button type="button" className="pe-button" disabled={!authToken || isTranslatingAll} title={authToken ? "使用后台配置的网络翻译" : "请先登录"} onClick={() => void translateAllTokens()}>
+                    <TranslateIcon size={14} /> {isTranslatingAll ? "翻译中…" : "一键翻译Tag"}
                 </button>
                 <span className="pe-dialog__hint">单击 Tag 文字编辑 · 双击屏蔽 · 拖动排序</span>
+                {translateError ? <span className="pe-dialog__error">{translateError}</span> : null}
             </div>
 
             <div className="pe-tokens">
@@ -374,11 +462,17 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                             </div>
                             {token.kind === "newline" ? null : (
                                 <div className="pe-token__translation">
-                                    {/* TODO: 翻译功能待重做，此处仅保留入口与占位 */}
-                                    <button type="button" className="pe-token__translate-icon" title="翻译（待重做）" aria-label="翻译">
+                                    <button
+                                        type="button"
+                                        className="pe-token__translate-icon"
+                                        title={authToken ? "翻译该 Tag" : "请先登录"}
+                                        aria-label="翻译"
+                                        disabled={!authToken || translatingTokenIds.includes(token.id)}
+                                        onClick={() => void translateToken(token)}
+                                    >
                                         <TranslateIcon />
                                     </button>
-                                    <span className="pe-token__translation-text">{token.translation || ""}</span>
+                                    <span className="pe-token__translation-text">{translatingTokenIds.includes(token.id) ? "翻译中…" : token.translation || ""}</span>
                                 </div>
                             )}
                         </div>

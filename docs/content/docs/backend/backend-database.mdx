@@ -97,51 +97,21 @@ WeiLin Danbooru 数据表，字段兼容 WeiLin SQL 包：
 | `updated_at` | string | 记录更新时间 |
 | `error` | string | 安装失败信息；为空表示安装成功 |
 
-## 第三方提示词翻译词库
+## 提示词翻译设置
 
-NovelAI 提示词积木块翻译查询保持 WeiLin 优先；当 `tag_tags.desc` 与 `danbooru_tag.translate` 都未命中时，后端可使用管理员安装的第三方离线 Danbooru 中英翻译词库作为 fallback。
+`promptTranslation` 私有设置描述 WeiLin 翻译模式、服务和源/目标语言，字段为 `enabled`、`translator`（当前仅 `library`）、`service`（`alibaba` / `bing` / `youdao`）、`sourceLanguage`、`targetLanguage`，缺失或非法值会在前后端两侧回落到 `library` + `alibaba` + `en` → `zh`。
 
-### 管理员安装流程
+本地翻译与网络翻译使用不同接口，互不影响：
 
-- 后台系统设置中提供“第三方翻译词库”管理区域。
-- 第一版固定来源为 `ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table` 的 latest release。
-- 后端只展示并允许安装 release assets 中的 `.csv` 文件，不接受任意 URL。
-- CSV 字段按 `name`、`category`、`cn_name`、`post_count` 解析；空 `name` 或空 `cn_name` 行会跳过。
-- 下载大小限制复用提示词数据库的 64MB 限制，并复用 `PROMPT_TAG_GITHUB_TOKEN` / `GITHUB_TOKEN` 读取 GitHub。
-
-### `prompt_tag_external_translations`
-
-管理员安装的第三方 Danbooru 中英翻译词库条目表：
-
-| 字段 | 类型 | 说明 |
+| 接口 | 鉴权 | 行为 |
 | --- | --- | --- |
-| `name` | string | Danbooru tag 原名，主键 |
-| `normalized_name` | string | 规范化名称索引，小写并将空格转为下划线 |
-| `category` | integer | Danbooru 分类 |
-| `cn_name` | text | 中文翻译 |
-| `post_count` | integer | Danbooru 投稿数量 |
-| `source_owner` | string | GitHub owner |
-| `source_repo` | string | GitHub repo |
-| `release_tag` | string | release tag |
-| `asset_name` | string | CSV asset 名称 |
-| `updated_at` | string | 记录更新时间 |
+| `POST /api/prompt-tags/translate` | 可选登录 | 只查询本地 `tag_tags.desc`，未命中再查 `danbooru_tag.translate`，不发公网请求 |
+| `POST /api/prompt-tags/network-translate` | 需要登录 | 读取服务端 `promptTranslation` 调用 Alibaba / Bing / Youdao，仅由用户在提示词编辑器点击翻译时触发 |
+| `POST /api/admin/prompt-translation/test` | 需要管理员 | 使用后台表单中尚未保存的配置测试翻译 |
 
-后端翻译 fallback 查询会尝试原 token、小写 token 与空格转下划线规范化形式，例如 `blue eyes` 可命中 `blue_eyes`。
+网络翻译限制单次最多 5000 字符、50 行（Youdao 额外限制 1000 字符），失败时返回可读错误而不会把错误文本当译文写回。
 
-### `prompt_tag_translation_installed_packages`
-
-记录第三方翻译词库 CSV asset 安装状态，用于后台状态展示和失败重试：
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `asset_name` | string | CSV asset 名称，主键 |
-| `source_owner` | string | GitHub owner |
-| `source_repo` | string | GitHub repo |
-| `release_tag` | string | release tag |
-| `size` | integer | CSV 文件大小 |
-| `installed_at` | string | 安装时间 |
-| `updated_at` | string | 记录更新时间 |
-| `error` | string | 安装失败信息；为空表示安装成功 |
+旧版离线翻译词库相关表不再由 GORM 迁移或运行时代码访问，但现有数据库中的旧表不会被主动删除。
 
 ## 前端 token metadata 关系
 

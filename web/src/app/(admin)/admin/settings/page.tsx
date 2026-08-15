@@ -13,21 +13,16 @@ import {
     fetchPromptTagDatabaseMainTree,
     fetchPromptTagDatabaseStatus,
     fetchPromptTagDatabaseTree,
-    fetchPromptTagTranslationDatabaseAssets,
-    fetchPromptTagTranslationDatabaseStatus,
     installPromptTagDatabasePackages,
-    installPromptTagTranslationDatabasePackage,
     saveAdminSettings,
     testChannelModel,
+    testPromptTranslation,
     type AdminModelChannel,
     type AdminModelCost,
     type AdminPromptTagDatabaseStatus,
     type AdminPromptTagInstallResult,
     type AdminPromptTagPackage,
     type AdminPromptTagPackageType,
-    type AdminPromptTagTranslationAsset,
-    type AdminPromptTagTranslationDatabaseStatus,
-    type AdminPromptTagTranslationInstallResult,
     type AdminSettings,
 } from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
@@ -64,7 +59,7 @@ const emptySettings: AdminSettings = {
         channels: [],
         promptSync: { enabled: true, cron: "*/5 * * * *" },
         promptTagDatabase: { enabled: true, owner: "weilin9999", repo: "WeiLin-Comfyui-Tools-Prompt", branch: "master", packages: [] },
-        promptTagTranslationDatabase: { enabled: true, owner: "ffdkj", repo: "ffdkj-Danbooru_Tag-Chinese-English-Translation-Table" },
+        promptTranslation: { enabled: true, translator: "library", service: "alibaba", sourceLanguage: "en", targetLanguage: "zh" },
         auth: { linuxDo: { clientId: "", clientSecret: "" } },
     },
 };
@@ -85,6 +80,25 @@ const emptyChannel: AdminModelChannel = {
         disableImg2Img: true,
     },
 };
+
+const PROMPT_TRANSLATION_SERVICES = [
+    { value: "alibaba", label: "Alibaba 翻译" },
+    { value: "bing", label: "Bing 翻译" },
+    { value: "youdao", label: "有道翻译" },
+];
+const PROMPT_TRANSLATION_LANGUAGES = [
+    { value: "en", label: "英语" },
+    { value: "zh", label: "中文" },
+    { value: "ja", label: "日语" },
+    { value: "ko", label: "韩语" },
+    { value: "fr", label: "法语" },
+    { value: "de", label: "德语" },
+    { value: "es", label: "西班牙语" },
+    { value: "ru", label: "俄语" },
+];
+const PROMPT_TRANSLATION_MAX_CHARS = 5000;
+const PROMPT_TRANSLATION_MAX_LINES = 50;
+const YOUDAO_TRANSLATION_MAX_CHARS = 1000;
 
 type SettingsTabKey = "public" | "private";
 type EditorMode = "visual" | "json";
@@ -126,24 +140,17 @@ export default function AdminSettingsPage() {
     const [isPromptTagTreeLoading, setIsPromptTagTreeLoading] = useState(false);
     const [isPromptTagInstalling, setIsPromptTagInstalling] = useState(false);
     const [promptTagInstallResult, setPromptTagInstallResult] = useState<AdminPromptTagInstallResult | null>(null);
-    const [promptTagTranslationStatus, setPromptTagTranslationStatus] = useState<AdminPromptTagTranslationDatabaseStatus | null>(null);
-    const [promptTagTranslationAssets, setPromptTagTranslationAssets] = useState<AdminPromptTagTranslationAsset[]>([]);
-    const [selectedPromptTagTranslationAsset, setSelectedPromptTagTranslationAsset] = useState<string | null>(null);
-    const [isPromptTagTranslationStatusLoading, setIsPromptTagTranslationStatusLoading] = useState(false);
-    const [isPromptTagTranslationAssetsLoading, setIsPromptTagTranslationAssetsLoading] = useState(false);
-    const [isPromptTagTranslationInstalling, setIsPromptTagTranslationInstalling] = useState(false);
-    const [promptTagTranslationInstallResult, setPromptTagTranslationInstallResult] = useState<AdminPromptTagTranslationInstallResult | null>(null);
+    const [translationTestText, setTranslationTestText] = useState("");
+    const [translationTestResult, setTranslationTestResult] = useState("");
+    const [translationTestError, setTranslationTestError] = useState("");
+    const [isTranslationTesting, setIsTranslationTesting] = useState(false);
     const publicModels = Form.useWatch(["public", "modelChannel", "availableModels"], form) || [];
     const promptTagSetting = Form.useWatch(["private", "promptTagDatabase"], form) || emptySettings.private.promptTagDatabase;
-    const promptTagTranslationSetting = Form.useWatch(["private", "promptTagTranslationDatabase"], form) || emptySettings.private.promptTagTranslationDatabase;
+    const promptTranslationSetting = Form.useWatch(["private", "promptTranslation"], form) || emptySettings.private.promptTranslation;
     const promptTagSource = {
         owner: promptTagStatus?.owner || promptTagSetting.owner || emptySettings.private.promptTagDatabase.owner,
         repo: promptTagStatus?.repo || promptTagSetting.repo || emptySettings.private.promptTagDatabase.repo,
         branch: promptTagStatus?.branch || promptTagSetting.branch || emptySettings.private.promptTagDatabase.branch,
-    };
-    const promptTagTranslationSource = {
-        owner: promptTagTranslationStatus?.owner || promptTagTranslationSetting.owner || emptySettings.private.promptTagTranslationDatabase.owner,
-        repo: promptTagTranslationStatus?.repo || promptTagTranslationSetting.repo || emptySettings.private.promptTagTranslationDatabase.repo,
     };
     const channelModels = useMemo(() => collectChannelModels(channels), [channels]);
     const channelTableData = useMemo(() => channels.map((channel, index) => ({ ...channel, _index: index, _rowKey: `${index}-${channel.name}-${channel.baseUrl}` })), [channels]);
@@ -429,62 +436,36 @@ export default function AdminSettingsPage() {
             setIsPromptTagTreeLoading(false);
         }
     };
-
     const refreshPromptTagDatabase = async () => {
         await Promise.all([loadPromptTagStatus(), loadPromptTagTree(promptTagCurrentPath)]);
     };
-
-    const loadPromptTagTranslationStatus = async () => {
+    const runTranslationTest = async () => {
         if (!token) return;
-        setIsPromptTagTranslationStatusLoading(true);
-        try {
-            const status = await fetchPromptTagTranslationDatabaseStatus(token);
-            setPromptTagTranslationStatus(status);
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "读取第三方翻译词库状态失败");
-        } finally {
-            setIsPromptTagTranslationStatusLoading(false);
-        }
-    };
-
-    const loadPromptTagTranslationAssets = async () => {
-        if (!token) return;
-        setIsPromptTagTranslationAssetsLoading(true);
-        try {
-            const assets = await fetchPromptTagTranslationDatabaseAssets(token);
-            setPromptTagTranslationAssets(assets);
-            setSelectedPromptTagTranslationAsset((current) => (current && assets.some((item) => item.name === current) ? current : assets[0]?.name || null));
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "读取第三方翻译词库 release 失败");
-        } finally {
-            setIsPromptTagTranslationAssetsLoading(false);
-        }
-    };
-
-    const refreshPromptTagTranslationDatabase = async () => {
-        await Promise.all([loadPromptTagTranslationStatus(), loadPromptTagTranslationAssets()]);
-    };
-
-    const installSelectedPromptTagTranslationAsset = async () => {
-        if (!token) return;
-        if (!selectedPromptTagTranslationAsset) {
-            message.warning("请先选择要安装的 CSV asset");
+        const text = translationTestText.trim();
+        if (!text) {
+            message.warning("请输入要测试的内容");
             return;
         }
-        setIsPromptTagTranslationInstalling(true);
+        const maxChars = promptTranslationSetting.service === "youdao" ? YOUDAO_TRANSLATION_MAX_CHARS : PROMPT_TRANSLATION_MAX_CHARS;
+        if (text.length > maxChars) {
+            message.warning(`测试内容最多 ${maxChars} 个字符`);
+            return;
+        }
+        if (text.split("\n").length > PROMPT_TRANSLATION_MAX_LINES) {
+            message.warning(`测试内容最多 ${PROMPT_TRANSLATION_MAX_LINES} 行`);
+            return;
+        }
+        setIsTranslationTesting(true);
+        setTranslationTestResult("");
+        setTranslationTestError("");
         try {
-            const result = await installPromptTagTranslationDatabasePackage(token, { assetName: selectedPromptTagTranslationAsset });
-            setPromptTagTranslationInstallResult(result);
-            setPromptTagTranslationStatus(result.status);
-            message.success(`翻译词库安装完成：新增 ${result.installed.length}，失败 ${result.failed.length}`);
-            await Promise.all([loadPromptTagTranslationStatus(), loadPromptTagTranslationAssets()]);
+            setTranslationTestResult(await testPromptTranslation(token, { text, setting: promptTranslationSetting }));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "安装第三方翻译词库失败");
+            setTranslationTestError(error instanceof Error ? error.message : "翻译测试失败");
         } finally {
-            setIsPromptTagTranslationInstalling(false);
+            setIsTranslationTesting(false);
         }
     };
-
     const installSelectedPromptTagPackages = async () => {
         if (!token) return;
         const selectedFiles = selectedPromptTagPaths.filter((path) => path.toLowerCase().endsWith(".sql"));
@@ -532,7 +513,6 @@ export default function AdminSettingsPage() {
     useEffect(() => {
         if (!token) return;
         void loadPromptTagStatus();
-        void loadPromptTagTranslationStatus();
     }, [token]);
 
     const testChannel = testChannelIndex === null ? null : normalizeChannel(channels[testChannelIndex]);
@@ -852,78 +832,63 @@ export default function AdminSettingsPage() {
                                         {promptTagInstallResult ? <PromptTagInstallResultView result={promptTagInstallResult} /> : null}
                                     </Flex>
                                 </Card>
-                                <Card
-                                    size="small"
-                                    title="第三方翻译词库"
-                                    extra={
-                                        <Space wrap>
-                                            <Button icon={<ReloadOutlined />} loading={isPromptTagTranslationStatusLoading || isPromptTagTranslationAssetsLoading} onClick={() => void refreshPromptTagTranslationDatabase()}>
-                                                刷新翻译词库 release
-                                            </Button>
-                                            <Button type="primary" loading={isPromptTagTranslationInstalling} disabled={!selectedPromptTagTranslationAsset} onClick={() => void installSelectedPromptTagTranslationAsset()}>
-                                                安装选中 CSV
-                                            </Button>
-                                        </Space>
-                                    }
-                                >
+                                <Card size="small" title="翻译设置">
                                     <Flex vertical gap={16}>
-                                        <Typography.Text type="secondary">第一版固定使用 ffdkj Danbooru 中英翻译词库；仅安装 release 中的 CSV asset，用于 WeiLin 未命中的 tag 中文翻译 fallback。</Typography.Text>
+                                        <Typography.Text type="secondary">翻译服务使用公网网页接口，仅在管理员测试或用户在提示词编辑器主动点击翻译时请求；修改后需点击页面顶部「保存设置」才会生效，测试不会写入配置。</Typography.Text>
                                         <Row gutter={[16, 12]} align="middle">
                                             <Col xs={24} md={6}>
-                                                <Form.Item name={["private", "promptTagTranslationDatabase", "enabled"]} label="启用第三方翻译词库" valuePropName="checked">
+                                                <Form.Item name={["private", "promptTranslation", "enabled"]} label="启用翻译" valuePropName="checked">
                                                     <Switch />
                                                 </Form.Item>
                                             </Col>
-                                            <Col xs={24} md={18}>
-                                                <Space size={8} wrap>
-                                                    <Tag color="purple">owner: {promptTagTranslationSource.owner}</Tag>
-                                                    <Tag color="purple">repo: {promptTagTranslationSource.repo}</Tag>
-                                                    {promptTagTranslationStatus?.releaseTag ? <Tag color="purple">release: {promptTagTranslationStatus.releaseTag}</Tag> : null}
-                                                </Space>
+                                            <Col xs={24} md={9}>
+                                                <Form.Item name={["private", "promptTranslation", "translator"]} label="翻译器">
+                                                    <Select options={[{ value: "library", label: "翻译库翻译" }]} />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={9}>
+                                                <Form.Item name={["private", "promptTranslation", "service"]} label="翻译服务">
+                                                    <Select options={PROMPT_TRANSLATION_SERVICES} />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["private", "promptTranslation", "sourceLanguage"]} label="源语言">
+                                                    <Select showSearch optionFilterProp="label" options={[{ value: "auto", label: "自动识别" }, ...PROMPT_TRANSLATION_LANGUAGES]} />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["private", "promptTranslation", "targetLanguage"]} label="目标语言">
+                                                    <Select showSearch optionFilterProp="label" options={PROMPT_TRANSLATION_LANGUAGES} />
+                                                </Form.Item>
                                             </Col>
                                         </Row>
                                         <Row gutter={[16, 12]}>
-                                            <Col xs={12} md={4}>
-                                                <PromptTagStatusMetric
-                                                    label="配置状态"
-                                                    value={promptTagTranslationStatus?.enabled ?? promptTagTranslationSetting.enabled ? "已启用" : "未启用"}
-                                                    color={promptTagTranslationStatus?.enabled ?? promptTagTranslationSetting.enabled ? "success" : "default"}
-                                                />
+                                            <Col xs={24} md={12}>
+                                                <Flex vertical gap={8}>
+                                                    <Typography.Text strong>翻译测试</Typography.Text>
+                                                    <Input.TextArea
+                                                        rows={5}
+                                                        value={translationTestText}
+                                                        onChange={(event) => setTranslationTestText(event.target.value)}
+                                                        placeholder={`使用当前表单配置测试，可多行输入，每行一个 Tag（最多 ${PROMPT_TRANSLATION_MAX_LINES} 行）`}
+                                                    />
+                                                    <Space size={8} wrap>
+                                                        <Button type="primary" loading={isTranslationTesting} disabled={!token} onClick={() => void runTranslationTest()}>
+                                                            测试翻译
+                                                        </Button>
+                                                        {translationTestResult ? <Tag color="success">测试成功</Tag> : null}
+                                                        {translationTestError ? <Tag color="error">测试失败</Tag> : null}
+                                                    </Space>
+                                                </Flex>
                                             </Col>
-                                            <Col xs={12} md={4}>
-                                                <PromptTagStatusMetric label="翻译条数" value={promptTagTranslationStatus?.translationCount ?? "-"} />
-                                            </Col>
-                                            <Col xs={12} md={4}>
-                                                <PromptTagStatusMetric label="已安装包" value={promptTagTranslationStatus?.installedPackages.length ?? 0} />
-                                            </Col>
-                                            <Col xs={24} md={6}>
-                                                <PromptTagStatusMetric label="最近安装" value={formatDateTime(promptTagTranslationStatus?.lastInstalledAt) || "-"} />
-                                            </Col>
-                                            <Col xs={24} md={6}>
-                                                <PromptTagStatusMetric label="最新 release" value={promptTagTranslationAssets[0]?.releaseTag || promptTagTranslationStatus?.releaseTag || "-"} />
+                                            <Col xs={24} md={12}>
+                                                <Flex vertical gap={8}>
+                                                    <Typography.Text strong>翻译结果</Typography.Text>
+                                                    <Input.TextArea rows={5} value={translationTestResult} readOnly placeholder="翻译结果将显示在这里" />
+                                                    {translationTestError ? <Typography.Text type="danger">{translationTestError}</Typography.Text> : null}
+                                                </Flex>
                                             </Col>
                                         </Row>
-                                        {promptTagTranslationStatus?.lastError ? <Typography.Text type="danger">最近错误：{promptTagTranslationStatus.lastError}</Typography.Text> : null}
-                                        <Table
-                                            size="small"
-                                            rowKey="name"
-                                            loading={isPromptTagTranslationAssetsLoading}
-                                            pagination={false}
-                                            dataSource={promptTagTranslationAssets}
-                                            rowSelection={{
-                                                type: "radio",
-                                                selectedRowKeys: selectedPromptTagTranslationAsset ? [selectedPromptTagTranslationAsset] : [],
-                                                onChange: (keys) => setSelectedPromptTagTranslationAsset(String(keys[0] || "") || null),
-                                            }}
-                                            locale={{ emptyText: "点击“刷新翻译词库 release”读取 CSV asset" }}
-                                            columns={[
-                                                { title: "asset 名称", dataIndex: "name", render: (value: string) => <Typography.Text>{value}</Typography.Text> },
-                                                { title: "大小", dataIndex: "size", width: 120, render: (value?: number) => formatBytes(value) },
-                                                { title: "release", dataIndex: "releaseTag", width: 150, render: (value: string) => <Tag>{value}</Tag> },
-                                                { title: "安装状态", dataIndex: "installed", width: 180, render: (_: boolean, item: AdminPromptTagTranslationAsset) => <PromptTagTranslationInstallState asset={item} /> },
-                                            ]}
-                                        />
-                                        {promptTagTranslationInstallResult ? <PromptTagTranslationInstallResultView result={promptTagTranslationInstallResult} /> : null}
                                     </Flex>
                                 </Card>
                                 <Button type="primary" icon={<PlusOutlined />} onClick={() => openChannelDrawer(null)}>
@@ -1300,6 +1265,7 @@ function normalizeModelCosts(items: Partial<AdminSettings["public"]["modelChanne
 }
 
 function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}): AdminSettings["private"] {
+    const translationService = setting.promptTranslation?.service;
     return {
         channels: (setting.channels || []).map(normalizeChannel),
         promptSync: {
@@ -1313,10 +1279,12 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
             branch: setting.promptTagDatabase?.branch || "master",
             packages: setting.promptTagDatabase?.packages || [],
         },
-        promptTagTranslationDatabase: {
-            enabled: setting.promptTagTranslationDatabase?.enabled !== false,
-            owner: setting.promptTagTranslationDatabase?.owner || "ffdkj",
-            repo: setting.promptTagTranslationDatabase?.repo || "ffdkj-Danbooru_Tag-Chinese-English-Translation-Table",
+        promptTranslation: {
+            enabled: setting.promptTranslation?.enabled !== false,
+            translator: "library",
+            service: translationService === "bing" || translationService === "youdao" ? translationService : "alibaba",
+            sourceLanguage: setting.promptTranslation?.sourceLanguage?.trim().toLowerCase() || "en",
+            targetLanguage: setting.promptTranslation?.targetLanguage?.trim().toLowerCase() || "zh",
         },
         auth: {
             linuxDo: {
@@ -1480,20 +1448,6 @@ function PromptTagInstallState({ packageItem }: PromptTagInstallStateProps) {
     return <Tag>未安装</Tag>;
 }
 
-type PromptTagTranslationInstallStateProps = {
-    asset: AdminPromptTagTranslationAsset;
-};
-
-function PromptTagTranslationInstallState({ asset }: PromptTagTranslationInstallStateProps) {
-    if (asset.error) {
-        return <Typography.Text type="danger">失败：{asset.error}</Typography.Text>;
-    }
-    if (asset.installed) {
-        return <Tag color="success">已安装{asset.installedAt ? ` · ${formatDateTime(asset.installedAt)}` : ""}</Tag>;
-    }
-    return <Tag>未安装</Tag>;
-}
-
 type PromptTagInstallResultViewProps = {
     result: AdminPromptTagInstallResult;
 };
@@ -1515,25 +1469,6 @@ function PromptTagInstallResultView({ result }: PromptTagInstallResultViewProps)
     );
 }
 
-type PromptTagTranslationInstallResultViewProps = {
-    result: AdminPromptTagTranslationInstallResult;
-};
-
-function PromptTagTranslationInstallResultView({ result }: PromptTagTranslationInstallResultViewProps) {
-    return (
-        <Card size="small" title="最近一次翻译词库安装结果" variant="borderless" style={{ background: "var(--ant-color-fill-quaternary)" }}>
-            <Flex vertical gap={10}>
-                <Space wrap>
-                    <Tag color="success">新增 {result.installed.length}</Tag>
-                    <Tag color={result.failed.length ? "error" : "default"}>失败 {result.failed.length}</Tag>
-                </Space>
-                <PromptTagTranslationResultList title="新增" items={result.installed} />
-                <PromptTagTranslationResultList title="失败" items={result.failed} showError />
-            </Flex>
-        </Card>
-    );
-}
-
 type PromptTagResultListProps = {
     title: string;
     items: AdminPromptTagInstallResult["installed"];
@@ -1549,29 +1484,6 @@ function PromptTagResultList({ title, items, showError = false }: PromptTagResul
                 {items.map((item) => (
                     <Typography.Text key={`${title}-${item.type}-${item.path}`} type={showError ? "danger" : undefined} style={{ wordBreak: "break-all" }}>
                         {item.path}
-                        {showError && item.error ? `：${item.error}` : ""}
-                    </Typography.Text>
-                ))}
-            </Space>
-        </Flex>
-    );
-}
-
-type PromptTagTranslationResultListProps = {
-    title: string;
-    items: AdminPromptTagTranslationInstallResult["installed"];
-    showError?: boolean;
-};
-
-function PromptTagTranslationResultList({ title, items, showError = false }: PromptTagTranslationResultListProps) {
-    if (!items.length) return null;
-    return (
-        <Flex vertical gap={4}>
-            <Typography.Text strong>{title}</Typography.Text>
-            <Space direction="vertical" size={2} style={{ width: "100%" }}>
-                {items.map((item) => (
-                    <Typography.Text key={`${title}-${item.assetName}`} type={showError ? "danger" : undefined} style={{ wordBreak: "break-all" }}>
-                        {item.assetName}
                         {showError && item.error ? `：${item.error}` : ""}
                     </Typography.Text>
                 ))}

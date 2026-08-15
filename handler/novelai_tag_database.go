@@ -24,8 +24,16 @@ type promptTagTranslationsRequest struct {
 	Tags []string `json:"tags"`
 }
 
+type promptNetworkTranslationRequest struct {
+	Text string `json:"text"`
+}
+
+type promptTranslationTestRequest struct {
+	Text    string                         `json:"text"`
+	Setting model.PromptTranslationSetting `json:"setting"`
+}
+
 type promptTagDatabaseInstallRequest = service.PromptTagInstallRequest
-type promptTagTranslationDatabaseInstallRequest = model.PromptTagTranslationInstallRequest
 
 func AdminPromptTagDatabaseStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := service.PromptTagDatabaseStatus()
@@ -67,35 +75,6 @@ func AdminInstallPromptTagDatabasePackages(w http.ResponseWriter, r *http.Reques
 	OK(w, result)
 }
 
-func AdminPromptTagTranslationDatabaseStatus(w http.ResponseWriter, r *http.Request) {
-	status, err := service.PromptTagTranslationDatabaseStatus()
-	if err != nil {
-		FailError(w, err)
-		return
-	}
-	OK(w, status)
-}
-
-func AdminPromptTagTranslationDatabaseAssets(w http.ResponseWriter, r *http.Request) {
-	items, err := service.PromptTagTranslationDatabaseAssets()
-	if err != nil {
-		FailError(w, err)
-		return
-	}
-	OK(w, items)
-}
-
-func AdminInstallPromptTagTranslationDatabasePackage(w http.ResponseWriter, r *http.Request) {
-	var request promptTagTranslationDatabaseInstallRequest
-	_ = json.NewDecoder(r.Body).Decode(&request)
-	result, err := service.InstallPromptTagTranslationDatabasePackage(request)
-	if err != nil {
-		FailError(w, err)
-		return
-	}
-	OK(w, result)
-}
-
 func PromptTagAutocomplete(w http.ResponseWriter, r *http.Request) {
 	query := promptTagSearchQueryFromRequest(r)
 	items, err := service.SearchPromptTags(query)
@@ -115,6 +94,28 @@ func PromptTagTranslations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	OK(w, translations)
+}
+
+func PromptNetworkTranslation(w http.ResponseWriter, r *http.Request) {
+	var request promptNetworkTranslationRequest
+	_ = json.NewDecoder(r.Body).Decode(&request)
+	translated, err := service.TranslatePromptText(request.Text)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, translated)
+}
+
+func AdminTestPromptTranslation(w http.ResponseWriter, r *http.Request) {
+	var request promptTranslationTestRequest
+	_ = json.NewDecoder(r.Body).Decode(&request)
+	translated, err := service.TestPromptTranslation(request.Text, request.Setting)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, translated)
 }
 
 func promptTagSearchQueryFromRequest(r *http.Request) model.PromptTagSearchQuery {

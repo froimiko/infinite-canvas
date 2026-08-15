@@ -148,6 +148,11 @@
     user-select: none;
 }
 
+.pe-dialog__error {
+    color: #dc2626;
+    font-size: 11px;
+}
+
 .pe-button {
     display: inline-flex;
     align-items: center;

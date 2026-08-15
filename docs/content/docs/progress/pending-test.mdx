@@ -5,7 +5,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
-- NovelAI 提示词积木块与 WeiLin / 第三方翻译词库：后台支持浏览并安装固定 WeiLin Prompt SQL 包，也支持读取固定 ffdkj Danbooru 中英翻译词库 release 并安装 CSV；失败的 WeiLin SQL 安装记录修复后允许重新安装并在成功后清空错误；前端提示词编辑器已改为原生 textarea 主输入 + 下方提示词块辅助视图，支持光标补全、拖拽排序、双击禁用、翻译显示和单 token 复制，并接入生图工作台、角色提示词和画布正/负提示词；仍需在云端环境验证 WeiLin 数据库安装、第三方 CSV 安装、WeiLin 未命中时的翻译 fallback、`blue eyes`/`blue_eyes` 空格下划线命中、GitHub 403 时 token 提示、长 prompt 复制粘贴、禁用 token 恢复和画布 `@mention` 交互。
+- NovelAI 提示词积木块与 WeiLin：后台支持浏览并安装固定 WeiLin Prompt SQL 包，失败的 SQL 安装记录修复后允许重试并在成功后清空错误；旧离线翻译词库表不再迁移或访问，也不会主动删除。前端提示词编辑器支持光标补全、拖拽排序、双击禁用、翻译显示和单 token 复制，并接入生图工作台、角色提示词和画布正/负提示词；仍需在云端环境验证 WeiLin 数据库安装、本地翻译顺序、GitHub 403 时 token 提示、长 prompt 复制粘贴、禁用 token 恢复和画布 `@mention` 交互。
+- WeiLin 翻译模块：后台「翻译设置」改为翻译库翻译配置，可选择 Alibaba / Bing / Youdao 与源/目标语言，并用当前表单值直接测试；`/api/prompt-tags/translate` 仍只查本地 `tag_tags` 与 `danbooru_tag`，新增登录保护的 `/api/prompt-tags/network-translate` 仅在 NovelAI 提示词编辑器点击单 Tag 翻译或「一键翻译Tag」时触发，批量按 50 项换行拆批且结果行数不符时逐条回退；仍需验证三家服务的真实可用性、失败与超时提示、批量译名回填顺序、未登录时翻译入口置灰，以及生图工作台自动翻译不会发起公网请求。
 - Codex App 插件文档：新增插件安装教程，区分 AI 自动安装、手动安装和本仓库开发调试安装；同步优化插件 README 与技能说明。
 - 配置与用户偏好：每个模型渠道新增 OpenAI / Gemini 调用格式选择，默认 OpenAI，切换默认格式时同步更新默认 Base URL；渠道 Tab 增加紧凑醒目的提醒，说明模型是否可选需要到“模型”Tab 选择。
 - Gemini 调用格式：支持拉取 Gemini 模型列表，并用于文本问答、在线 Agent 工具调用、基础生图和图生图请求。

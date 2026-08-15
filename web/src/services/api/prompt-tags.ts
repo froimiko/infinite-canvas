@@ -35,3 +35,8 @@ export async function searchPromptTags(payload: PromptTagSearchPayload) {
 export async function translatePromptTags(tags: string[]) {
     return apiPost<Record<string, string>>("/api/prompt-tags/translate", { tags });
 }
+
+/** 主动触发的网络翻译，仅供用户点击时调用，不要用于自动翻译。 */
+export async function networkTranslatePromptText(text: string, token?: string) {
+    return apiPost<string>("/api/prompt-tags/network-translate", { text }, token);
+}

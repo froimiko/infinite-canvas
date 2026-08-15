@@ -126,7 +126,7 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 	}
 	setting.PromptSync = normalizePromptSyncSetting(setting.PromptSync)
 	setting.PromptTagDatabase = normalizePromptTagDatabaseSetting(setting.PromptTagDatabase)
-	setting.PromptTagTranslationDatabase = normalizePromptTagTranslationDatabaseSetting(setting.PromptTagTranslationDatabase)
+	setting.PromptTranslation = normalizePromptTranslationSetting(setting.PromptTranslation)
 	for i := range setting.Channels {
 		if setting.Channels[i].Protocol == "" {
 			setting.Channels[i].Protocol = "openai"
@@ -196,18 +196,26 @@ func promptTagPackageNameFromPath(path string) string {
 	return path
 }
 
-func normalizePromptTagTranslationDatabaseSetting(setting model.PromptTagTranslationDatabaseSetting) model.PromptTagTranslationDatabaseSetting {
+func normalizePromptTranslationSetting(setting model.PromptTranslationSetting) model.PromptTranslationSetting {
 	if setting.Enabled == nil {
 		enabled := true
 		setting.Enabled = &enabled
 	}
-	setting.Owner = strings.TrimSpace(setting.Owner)
-	if setting.Owner == "" {
-		setting.Owner = model.PromptTagTranslationDatabaseDefaultOwner
+	if setting.Translator != model.PromptTranslatorLibrary {
+		setting.Translator = model.DefaultPromptTranslator
 	}
-	setting.Repo = strings.TrimSpace(setting.Repo)
-	if setting.Repo == "" {
-		setting.Repo = model.PromptTagTranslationDatabaseDefaultRepo
+	switch setting.Service {
+	case model.PromptTranslationServiceAlibaba, model.PromptTranslationServiceBing, model.PromptTranslationServiceYoudao:
+	default:
+		setting.Service = model.DefaultPromptTranslationService
+	}
+	setting.SourceLanguage = strings.ToLower(strings.TrimSpace(setting.SourceLanguage))
+	if setting.SourceLanguage == "" {
+		setting.SourceLanguage = model.DefaultPromptTranslationSourceLanguage
+	}
+	setting.TargetLanguage = strings.ToLower(strings.TrimSpace(setting.TargetLanguage))
+	if setting.TargetLanguage == "" {
+		setting.TargetLanguage = model.DefaultPromptTranslationTargetLanguage
 	}
 	return setting
 }

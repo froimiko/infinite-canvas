@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -96,5 +97,53 @@ func TestNormalizeSettingsPublishesEnabledChannelModelsAndRepairsDefaults(t *tes
 	}
 	if channel.DefaultVideoModel != "doubao-seedance-2.0-fast" {
 		t.Fatalf("default video model = %q, want seedance", channel.DefaultVideoModel)
+	}
+}
+
+func TestNormalizePromptTranslationSettingUsesDefaults(t *testing.T) {
+	setting := normalizePromptTranslationSetting(model.PromptTranslationSetting{})
+	if setting.Enabled == nil || !*setting.Enabled {
+		t.Fatalf("enabled = %#v, want true", setting.Enabled)
+	}
+	if setting.Translator != model.PromptTranslatorLibrary {
+		t.Fatalf("translator = %q, want %q", setting.Translator, model.PromptTranslatorLibrary)
+	}
+	if setting.Service != model.PromptTranslationServiceAlibaba {
+		t.Fatalf("service = %q, want %q", setting.Service, model.PromptTranslationServiceAlibaba)
+	}
+	if setting.SourceLanguage != "en" || setting.TargetLanguage != "zh" {
+		t.Fatalf("languages = %q -> %q, want en -> zh", setting.SourceLanguage, setting.TargetLanguage)
+	}
+}
+
+func TestNormalizePrivateSettingDefaultsPromptTranslationForLegacyJSON(t *testing.T) {
+	var setting model.PrivateSetting
+	if err := json.Unmarshal([]byte("{\"promptTagTranslationDatabase\":{\"enabled\":false,\"owner\":\"ffdkj\",\"repo\":\"legacy\"}}"), &setting); err != nil {
+		t.Fatalf("unmarshal legacy private settings: %v", err)
+	}
+	translation := normalizePrivateSetting(setting).PromptTranslation
+	enabled := translation.Enabled != nil && *translation.Enabled
+	if !enabled || translation.Translator != model.PromptTranslatorLibrary || translation.Service != model.PromptTranslationServiceAlibaba || translation.SourceLanguage != "en" || translation.TargetLanguage != "zh" {
+		t.Fatalf("promptTranslation = enabled:%t translator:%q service:%q source:%q target:%q, want true/library/alibaba/en/zh", enabled, translation.Translator, translation.Service, translation.SourceLanguage, translation.TargetLanguage)
+	}
+}
+
+func TestNormalizePromptTranslationSettingRepairsInvalidValues(t *testing.T) {
+	disabled := false
+	setting := normalizePromptTranslationSetting(model.PromptTranslationSetting{
+		Enabled:        &disabled,
+		Translator:     model.PromptTranslator("invalid"),
+		Service:        model.PromptTranslationService("invalid"),
+		SourceLanguage: "  EN-US ",
+		TargetLanguage: "  ",
+	})
+	if setting.Enabled == nil || *setting.Enabled {
+		t.Fatalf("enabled = %#v, want false", setting.Enabled)
+	}
+	if setting.Translator != model.PromptTranslatorLibrary || setting.Service != model.PromptTranslationServiceAlibaba {
+		t.Fatalf("translator/service = %q/%q, want library/alibaba", setting.Translator, setting.Service)
+	}
+	if setting.SourceLanguage != "en-us" || setting.TargetLanguage != "zh" {
+		t.Fatalf("languages = %q -> %q, want en-us -> zh", setting.SourceLanguage, setting.TargetLanguage)
 	}
 }
