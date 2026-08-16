@@ -205,19 +205,8 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 		}
 	}
 
-	// 准备 quality tags（V4 模型会自动添加）
-	qualityTags := ""
-	if isV4Model {
-		qualityTags = "very aesthetic, masterpiece, no text"
-	} else {
-		qualityTags = "masterpiece, best quality"
-	}
-
-	// 构建完整 input（提示词 + quality tags）
+	// 质量词由前端按模型注入，这里不再追加，避免与前端预设重复。
 	fullPrompt := openAI.Prompt
-	if qualityTags != "" {
-		fullPrompt = openAI.Prompt + ", " + qualityTags
-	}
 
 	// 构建 NovelAI 请求
 	naiReq := &novelAIRequest{
@@ -266,25 +255,12 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			useCoords = useManualRoleCoords
 		}
 
-		v4BaseCaption := qualityTags
-		v4CharCaptions := []v4CharCaption{
-			{
-				CharCaption: openAI.Prompt,
-				Centers: []v4Position{
-					{X: 0.5, Y: 0.5}, // 居中
-				},
-			},
-		}
-		v4NegativeCharCaptions := []v4CharCaption{
-			{
-				CharCaption: "",
-				Centers: []v4Position{
-					{X: 0.5, Y: 0.5},
-				},
-			},
-		}
+		// 单人场景：完整提示词必须留在 base_caption，char_captions 保持为空，
+		// 否则 NAI4 会把画面主体当成一个角色，导致构图松散、提示词遵循度下降。
+		v4BaseCaption := fullPrompt
+		v4CharCaptions := []v4CharCaption{}
+		v4NegativeCharCaptions := []v4CharCaption{}
 		if useRolePrompts {
-			v4BaseCaption = openAI.Prompt
 			v4CharCaptions = charCaptions
 			v4NegativeCharCaptions = charNegCaptions
 			naiReq.Parameters.CharacterPrompts = compatPrompts

@@ -6,6 +6,7 @@ node_modules/
 data/
 t2i-i2v-nai-main/
 WeiLin-Comfyui-Tools-main/
+Aaalice_NAI_Launcher-main/
 *.log
 *.tsbuildinfo
 .DS_Store

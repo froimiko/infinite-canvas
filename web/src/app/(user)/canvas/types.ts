@@ -1,4 +1,5 @@
 import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
+import type { NovelAIQualityPreset, NovelAIUcPreset } from "@/components/novelai/novelai-presets";
 import type { NovelAISettings } from "@/types/image";
 
 export type Position = {
@@ -35,6 +36,8 @@ export type CanvasNodeMetadata = Partial<NovelAISettings> & {
     naPromptTokens?: PromptBlockToken[];
     naNegativePromptTokens?: PromptBlockToken[];
     naSeedLocked?: boolean;
+    naQualityPreset?: NovelAIQualityPreset;
+    naUcPreset?: NovelAIUcPreset;
     status?: CanvasNodeStatus;
     errorDetails?: string;
     fontSize?: number;

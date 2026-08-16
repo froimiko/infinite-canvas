@@ -41,10 +41,20 @@ export type PromptEditorTarget = {
     tokens?: PromptBlockToken[];
 };
 
+export type PromptEditorPresetOption = { value: string; label: string };
+
+export type PromptEditorPreset = {
+    label: string;
+    value: string;
+    options: PromptEditorPresetOption[];
+    onChange: (value: string) => void;
+};
+
 type PromptEditorDialogProps = {
     open: boolean;
     title?: string;
     target: PromptEditorTarget;
+    preset?: PromptEditorPreset;
     onSubmit: (value: string, tokens: PromptBlockToken[]) => void;
     onClose: () => void;
 };
@@ -52,7 +62,7 @@ type PromptEditorDialogProps = {
 type DragState = { x: number; y: number };
 type ResizeState = { corner: ResizeCorner; startX: number; startY: number; startWidth: number; startHeight: number; startLeft: number; startTop: number };
 
-export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器", target, onSubmit, onClose }: PromptEditorDialogProps) {
+export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器", target, preset, onSubmit, onClose }: PromptEditorDialogProps) {
     const [tokens, setTokens] = useState<PromptBlockToken[]>([]);
     const [draft, setDraft] = useState("");
     const [suggestions, setSuggestions] = useState<TagSearchResult[]>([]);
@@ -412,6 +422,18 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                 <button type="button" className="pe-button" onClick={() => setShowDeleteButtons((current) => !current)}>
                     <X className="size-3.5" /> {showDeleteButtons ? "隐藏删除按钮" : "显示删除按钮"}
                 </button>
+                {preset ? (
+                    <label className="pe-preset" title="生成时按当前模型注入，不会写入输入框">
+                        <span className="pe-preset__label">{preset.label}</span>
+                        <select className="pe-preset__select" value={preset.value} onChange={(event) => preset.onChange(event.target.value)}>
+                            {preset.options.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                    {option.label}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                ) : null}
                 <button type="button" className="pe-button" disabled={!authToken || isTranslatingAll} title={authToken ? "使用后台配置的网络翻译" : "请先登录"} onClick={() => void translateAllTokens()}>
                     <TranslateIcon size={14} /> {isTranslatingAll ? "翻译中…" : "一键翻译Tag"}
                 </button>

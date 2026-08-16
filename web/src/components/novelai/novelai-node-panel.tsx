@@ -10,6 +10,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { NovelAIParamsPanel } from "./novelai-params-panel";
+import { NOVELAI_QUALITY_PRESET_OPTIONS, NOVELAI_UC_PRESET_OPTIONS, normalizeNovelAIQualityPreset, normalizeNovelAIUcPreset } from "./novelai-presets";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/app/(user)/canvas/types";
 
 const PANEL_WIDTH = 300;
@@ -164,6 +165,21 @@ export function NovelAINodePanel({ node, isRunning, onConfigChange, onGenerate, 
                 <PromptEditorDialog
                     open
                     target={editor.target}
+                    preset={
+                        editor.field === "positive"
+                            ? {
+                                  label: "质量词",
+                                  value: normalizeNovelAIQualityPreset(metadata.naQualityPreset),
+                                  options: NOVELAI_QUALITY_PRESET_OPTIONS,
+                                  onChange: (value) => onConfigChange(node.id, { naQualityPreset: normalizeNovelAIQualityPreset(value) }),
+                              }
+                            : {
+                                  label: "负面质量词",
+                                  value: normalizeNovelAIUcPreset(metadata.naUcPreset),
+                                  options: NOVELAI_UC_PRESET_OPTIONS,
+                                  onChange: (value) => onConfigChange(node.id, { naUcPreset: normalizeNovelAIUcPreset(value) }),
+                              }
+                    }
                     onClose={() => setEditor(null)}
                     onSubmit={(value, tokens) => onConfigChange(node.id, editor.field === "positive" ? { naPositivePrompt: value, naPromptTokens: tokens } : { naNegativePrompt: value, naNegativePromptTokens: tokens })}
                 />

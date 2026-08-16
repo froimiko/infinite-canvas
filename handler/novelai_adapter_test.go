@@ -101,6 +101,34 @@ func TestConvertToNovelAIRequestSyncsV4NegativePrompt(t *testing.T) {
 	}
 }
 
+func TestConvertToNovelAIRequestSingleCharacterKeepsPromptInBaseCaption(t *testing.T) {
+	const prompt = "1girl, silver hair, detailed background"
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Model:  "nai-diffusion-4-5-full",
+		Prompt: prompt,
+		Size:   "832x1216",
+	})
+
+	if req.Input != prompt {
+		t.Fatalf("input = %q, want prompt without injected quality tags", req.Input)
+	}
+	if req.Parameters.V4Prompt == nil {
+		t.Fatal("expected V4Prompt to be set")
+	}
+	if got := req.Parameters.V4Prompt.Caption.BaseCaption; got != prompt {
+		t.Fatalf("v4 base caption = %q, want full prompt", got)
+	}
+	if got := len(req.Parameters.V4Prompt.Caption.CharCaptions); got != 0 {
+		t.Fatalf("char caption count = %d, want 0 for single character", got)
+	}
+	if got := len(req.Parameters.V4NegativePrompt.Caption.CharCaptions); got != 0 {
+		t.Fatalf("negative char caption count = %d, want 0 for single character", got)
+	}
+	if req.Parameters.V4Prompt.UseCoords {
+		t.Fatal("single character should not enable use_coords")
+	}
+}
+
 func TestConvertToNovelAIRequestEnabledOverridesParameters(t *testing.T) {
 	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
 		Model:               "nai-diffusion-3",

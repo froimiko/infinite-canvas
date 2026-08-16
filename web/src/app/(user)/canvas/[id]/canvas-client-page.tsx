@@ -17,6 +17,7 @@ import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { normalizeNovelAISettings } from "@/lib/novelai-config";
+import { applyNovelAIQualityTags, applyNovelAIUcPreset, normalizeNovelAIQualityPreset, normalizeNovelAIUcPreset, resolveNovelAIModelId } from "@/components/novelai/novelai-presets";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -2056,8 +2057,12 @@ function InfiniteCanvasPage() {
                     const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
                     const promptTokens = sourceNode?.metadata?.promptTokens;
-                    const negativePrompt = (sourceNode?.metadata?.naNegativePrompt || "").trim();
+                    // NovelAI 质量词/负面预设不写进输入框，这里按当前模型注入。
+                    const isNovelAINode = sourceNode?.type === CanvasNodeType.NovelAI;
+                    const presetModel = resolveNovelAIModelId(generationConfig.novelAIModel || generationConfig.model);
+                    const negativePrompt = isNovelAINode ? applyNovelAIUcPreset(sourceNode?.metadata?.naNegativePrompt || "", presetModel, normalizeNovelAIUcPreset(sourceNode?.metadata?.naUcPreset)) : (sourceNode?.metadata?.naNegativePrompt || "").trim();
                     const requestOptions = negativePrompt ? { negativePrompt } : undefined;
+                    const requestPrompt = isNovelAINode ? applyNovelAIQualityTags(effectivePrompt, presetModel, normalizeNovelAIQualityPreset(sourceNode?.metadata?.naQualityPreset)) : effectivePrompt;
                     const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages, promptTokens);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
@@ -2151,8 +2156,8 @@ function InfiniteCanvasPage() {
                         targetIds.map(async (targetId) => {
                             try {
                                 const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, { ...requestOptions, signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { ...requestOptions, signal: controller.signal }).then((items) => items[0]);
+                                    ? await requestEdit({ ...generationConfig, count: "1" }, requestPrompt, referenceImages, undefined, { ...requestOptions, signal: controller.signal }).then((items) => items[0])
+                                    : await requestGeneration({ ...generationConfig, count: "1" }, requestPrompt, { ...requestOptions, signal: controller.signal }).then((items) => items[0]);
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {

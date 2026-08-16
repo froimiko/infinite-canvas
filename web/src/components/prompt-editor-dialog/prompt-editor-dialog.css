@@ -147,10 +147,41 @@
     font-size: 11px;
     user-select: none;
 }
-
 .pe-dialog__error {
     color: #dc2626;
     font-size: 11px;
+}
+
+.pe-preset {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    background: #2a2a2e;
+    color: #e4e4e7;
+    font-size: 12px;
+}
+
+.pe-preset__label {
+    color: #a1a1aa;
+    white-space: nowrap;
+}
+
+.pe-preset__select {
+    border: none;
+    outline: none;
+    background: transparent;
+    color: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.pe-preset__select option {
+    background: #2a2a2e;
+    color: #e4e4e7;
 }
 
 .pe-button {
