@@ -472,3 +472,134 @@ func int64Ptr(value int64) *int64 {
 func float64Ptr(value float64) *float64 {
 	return &value
 }
+
+func TestAlignTo64RoundsToNearest(t *testing.T) {
+	tests := []struct {
+		input  int
+		expect int
+	}{
+		{0, 64},
+		{32, 64},
+		{64, 64},
+		{65, 64},
+		{96, 64},
+		{100, 128},
+		{500, 512},
+		{1000, 1024},
+		{1024, 1024},
+		{1025, 1024},
+		{1056, 1088},
+		{2048, 2048},
+	}
+	for _, tt := range tests {
+		got := alignTo64(tt.input)
+		if got != tt.expect {
+			t.Errorf("alignTo64(%d) = %d, want %d", tt.input, got, tt.expect)
+		}
+	}
+}
+
+func TestResolveNovelAIModelWordBoundary(t *testing.T) {
+	tests := []struct {
+		input  string
+		expect string
+	}{
+		// 完全匹配
+		{"nai-diffusion-3", "nai-diffusion-3"},
+		{"nai-diffusion-4-5-full", "nai-diffusion-4-5-full"},
+		{"nai-diffusion-4-curated-preview", "nai-diffusion-4-curated-preview"},
+		// 简写带分隔符
+		{"v3", "nai-diffusion-3"},
+		{"v4", "nai-diffusion-4-curated-preview"},
+		{"v4.5", "nai-diffusion-4-5-full"},
+		{"4.5", "nai-diffusion-4-5-full"},
+		{"nai-diffusion-4-5", "nai-diffusion-4-5-full"},
+		{"some-v3-model", "nai-diffusion-3"},
+		{"model-v4-test", "nai-diffusion-4-curated-preview"},
+		// 词边界防呆：不应匹配
+		{"anime-v3style", "nai-diffusion-3"}, // v3 后面是字母 → 不匹配 → 默认 V3
+		{"xv4y", "nai-diffusion-3"},          // v4 前后都是字母 → 不匹配 → 默认 V3
+		{"myv3test", "nai-diffusion-3"},      // v3 前后都是字母 → 不匹配 → 默认 V3
+		// furry
+		{"nai-diffusion-furry", "nai-diffusion-furry"},
+		{"furry-model", "nai-diffusion-furry"},
+		// 空值默认
+		{"", "nai-diffusion-3"},
+		{"unknown", "nai-diffusion-3"},
+	}
+	for _, tt := range tests {
+		got := resolveNovelAIModel(tt.input)
+		if got != tt.expect {
+			t.Errorf("resolveNovelAIModel(%q) = %q, want %q", tt.input, got, tt.expect)
+		}
+	}
+}
+
+func TestConvertToNovelAIRequestQualityTogglePasses(t *testing.T) {
+	toggleFalse := false
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Model:          "nai-diffusion-3",
+		Prompt:         "test",
+		Size:           "1024x1024",
+		NovelAIEnabled: true,
+		QualityToggle:  &toggleFalse,
+	})
+	if req.Parameters.QualityToggle {
+		t.Fatalf("qualityToggle = true, want false")
+	}
+}
+
+func TestConvertToNovelAIRequestAddOriginalImagePasses(t *testing.T) {
+	off := false
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Model:           "nai-diffusion-3",
+		Prompt:          "test",
+		Size:            "1024x1024",
+		NovelAIEnabled:  true,
+		AddOriginalImage: &off,
+	})
+	if req.Parameters.AddOriginalImage {
+		t.Fatalf("addOriginalImage = true, want false")
+	}
+}
+
+func TestConvertToNovelAIRequestV4DisablesDynamicThresholding(t *testing.T) {
+	dt := true
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Model:               "nai-diffusion-4-5-full",
+		Prompt:              "test",
+		Size:                "1024x1024",
+		NovelAIEnabled:      true,
+		DynamicThresholding: &dt,
+	})
+	if req.Parameters.DynamicThresholding {
+		t.Fatalf("dynamic_thresholding = true, want false for V4 model")
+	}
+}
+
+func TestConvertToNovelAIRequestV3KeepsDynamicThresholding(t *testing.T) {
+	dt := true
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Model:               "nai-diffusion-3",
+		Prompt:              "test",
+		Size:                "1024x1024",
+		NovelAIEnabled:      true,
+		DynamicThresholding: &dt,
+	})
+	if !req.Parameters.DynamicThresholding {
+		t.Fatalf("dynamic_thresholding = false, want true for V3 model")
+	}
+}
+
+func TestConvertToNovelAIRequestV4ForcesKarrasNoiseSchedule(t *testing.T) {
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Model:          "nai-diffusion-4-5-full",
+		Prompt:         "test",
+		Size:           "1024x1024",
+		NovelAIEnabled: true,
+		NoiseSchedule:  "native",
+	})
+	if req.Parameters.NoiseSchedule != "karras" {
+		t.Fatalf("noise_schedule = %q, want karras for V4 model", req.Parameters.NoiseSchedule)
+	}
+}

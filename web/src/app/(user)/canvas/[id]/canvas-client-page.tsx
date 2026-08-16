@@ -2063,7 +2063,14 @@ function InfiniteCanvasPage() {
                     const negativePrompt = isNovelAINode ? applyNovelAIUcPreset(sourceNode?.metadata?.naNegativePrompt || "", presetModel, normalizeNovelAIUcPreset(sourceNode?.metadata?.naUcPreset)) : (sourceNode?.metadata?.naNegativePrompt || "").trim();
                     const requestOptions = negativePrompt ? { negativePrompt } : undefined;
                     const requestPrompt = isNovelAINode ? applyNovelAIQualityTags(effectivePrompt, presetModel, normalizeNovelAIQualityPreset(sourceNode?.metadata?.naQualityPreset)) : effectivePrompt;
-                    const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages, promptTokens);
+                    // NovelAI 节点的 qualityToggle / addOriginalImage 需要随请求发送给后端。
+                    const naQualityToggle = isNovelAINode ? normalizeNovelAIQualityPreset(sourceNode?.metadata?.naQualityPreset) !== "none" : undefined;
+                    const naAddOriginalImage = isNovelAINode ? sourceNode?.metadata?.naAddOriginalImage : undefined;
+                    const novelAIGenerationConfig =
+                        naQualityToggle !== undefined || naAddOriginalImage !== undefined
+                            ? { ...generationConfig, ...(naQualityToggle !== undefined ? { novelAIQualityToggle: naQualityToggle } : {}), ...(naAddOriginalImage !== undefined ? { novelAIAddOriginalImage: naAddOriginalImage } : {}) }
+                            : generationConfig;
+                    const generationMetadata = buildImageGenerationMetadata(generationType, novelAIGenerationConfig, count, referenceImages, promptTokens);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
@@ -2156,8 +2163,8 @@ function InfiniteCanvasPage() {
                         targetIds.map(async (targetId) => {
                             try {
                                 const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, requestPrompt, referenceImages, undefined, { ...requestOptions, signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, requestPrompt, { ...requestOptions, signal: controller.signal }).then((items) => items[0]);
+                                    ? await requestEdit({ ...novelAIGenerationConfig, count: "1" }, requestPrompt, referenceImages, undefined, { ...requestOptions, signal: controller.signal }).then((items) => items[0])
+                                    : await requestGeneration({ ...novelAIGenerationConfig, count: "1" }, requestPrompt, { ...requestOptions, signal: controller.signal }).then((items) => items[0]);
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {

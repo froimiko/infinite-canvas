@@ -40,4 +40,6 @@ export type NovelAISettings = {
     novelAIDivideRoles: boolean;
     novelAIUseAutoPositioning: boolean;
     novelAICharacterPrompts: NovelAICharacterPrompt[];
+    novelAIQualityToggle: boolean;
+    novelAIAddOriginalImage: boolean;
 };

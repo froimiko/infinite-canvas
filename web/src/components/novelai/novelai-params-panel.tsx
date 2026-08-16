@@ -8,6 +8,7 @@ import { NOVELAI_NOISE_SCHEDULES, NOVELAI_SAMPLERS } from "./novelai-constants";
 import { NovelAIResolutionSelect } from "./novelai-resolution-select";
 import { formatNovelAISize, parseNovelAISize } from "./novelai-resolutions";
 import type { CanvasNodeMetadata } from "@/app/(user)/canvas/types";
+import { resolveNovelAIModelId } from "./novelai-presets";
 import "./novelai-params-panel.css";
 
 const MAX_COUNT = 15;
@@ -42,6 +43,10 @@ export function NovelAIParamsPanel({ metadata, theme, onChange }: NovelAIParamsP
     const seed = Number(metadata.novelAISeed ?? -1);
     const seedLocked = Boolean(metadata.naSeedLocked);
     const count = Math.max(1, Math.min(MAX_COUNT, Math.floor(Math.abs(Number(metadata.count)) || 1)));
+    const modelId = resolveNovelAIModelId(metadata.novelAIModel || metadata.model);
+    const isV4 = modelId.startsWith("nai-diffusion-4");
+    const qualityToggle = metadata.naQualityToggle !== false;
+    const addOriginalImage = metadata.naAddOriginalImage !== false;
 
     const updateDimension = (key: "width" | "height", next: number) => {
         const safe = Math.max(64, Math.round(next || 0));
@@ -91,11 +96,14 @@ export function NovelAIParamsPanel({ metadata, theme, onChange }: NovelAIParamsP
             </div>
 
             <div className="na-field">
-                <div className="na-label">噪声调度</div>
+                <div className="na-label">噪声调度{isV4 ? "（V4 不支持 Native）" : ""}</div>
                 <NativeSelect
-                    value={metadata.novelAINoiseSchedule || "karras"}
-                    options={NOVELAI_NOISE_SCHEDULES.map((value) => ({ value, label: NOISE_LABELS[value] || value }))}
-                    onChange={(value) => onChange({ novelAINoiseSchedule: value as CanvasNodeMetadata["novelAINoiseSchedule"] })}
+                    value={isV4 && metadata.novelAINoiseSchedule === "native" ? "karras" : metadata.novelAINoiseSchedule || "karras"}
+                    options={NOVELAI_NOISE_SCHEDULES.map((value) => ({ value, label: isV4 && value === "native" ? "Native（V4 不可用）" : NOISE_LABELS[value] || value }))}
+                    onChange={(value) => {
+                        if (isV4 && value === "native") return;
+                        onChange({ novelAINoiseSchedule: value as CanvasNodeMetadata["novelAINoiseSchedule"] });
+                    }}
                 />
             </div>
 
@@ -130,6 +138,24 @@ export function NovelAIParamsPanel({ metadata, theme, onChange }: NovelAIParamsP
                     />
                     <button type="button" className={`na-icon-button ${seedLocked ? "is-active" : ""}`} title={seedLocked ? "解锁种子" : "锁定种子"} onClick={() => onChange({ naSeedLocked: !seedLocked })}>
                         {seedLocked ? <Lock className="size-4" /> : <Unlock className="size-4" />}
+                    </button>
+                </div>
+            </div>
+
+            <div className="na-field">
+                <div className="na-label-row">
+                    <span className="na-label">质量词增强</span>
+                    <button type="button" className={`na-pill ${qualityToggle ? "is-active" : ""}`} onClick={() => onChange({ naQualityToggle: !qualityToggle })}>
+                        {qualityToggle ? "开" : "关"}
+                    </button>
+                </div>
+            </div>
+
+            <div className="na-field">
+                <div className="na-label-row">
+                    <span className="na-label">附加原图（img2img）</span>
+                    <button type="button" className={`na-pill ${addOriginalImage ? "is-active" : ""}`} onClick={() => onChange({ naAddOriginalImage: !addOriginalImage })}>
+                        {addOriginalImage ? "开" : "关"}
                     </button>
                 </div>
             </div>

@@ -34,4 +34,6 @@ export const DEFAULT_NOVELAI_SETTINGS: NovelAISettings = {
     novelAIDivideRoles: false,
     novelAIUseAutoPositioning: false,
     novelAICharacterPrompts: [],
+    novelAIQualityToggle: true,
+    novelAIAddOriginalImage: true,
 };

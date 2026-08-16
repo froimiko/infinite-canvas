@@ -38,6 +38,8 @@ export type CanvasNodeMetadata = Partial<NovelAISettings> & {
     naSeedLocked?: boolean;
     naQualityPreset?: NovelAIQualityPreset;
     naUcPreset?: NovelAIUcPreset;
+    naQualityToggle?: boolean;
+    naAddOriginalImage?: boolean;
     status?: CanvasNodeStatus;
     errorDetails?: string;
     fontSize?: number;

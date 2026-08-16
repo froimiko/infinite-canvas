@@ -128,6 +128,8 @@ type openAIImageRequest struct {
 	ResponseFormat string `json:"response_format"`
 
 	NovelAIEnabled       bool                          `json:"novelai_enabled"`
+	QualityToggle        *bool                         `json:"quality_toggle"`
+	AddOriginalImage     *bool                         `json:"add_original_image"`
 	NovelAIModel         string                        `json:"novelai_model"`
 	Sampler              string                        `json:"sampler"`
 	Steps                *int                          `json:"steps"`
@@ -200,9 +202,12 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 		sm = nil
 		smDyn = nil
 		aqtPreset = normalizeNovelAIAqtPreset(openAI.AqtPreset, "safe")
+		// V4 不支持 native，参考实现同样在此回退为 karras。
 		if noiseSchedule == "native" {
 			noiseSchedule = "karras"
 		}
+		// dynamic_thresholding（Decrisp）仅 V3 生效，V4 下不发送。
+		dynamicThresholding = false
 	}
 
 	// 质量词由前端按模型注入，这里不再追加，避免与前端预设重复。
@@ -227,7 +232,7 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 
 			// V4/V4.5 特性参数
 			UCPreset:          ucPreset,
-			QualityToggle:     true,
+			QualityToggle:     normalizeBool(openAI.QualityToggle, true),
 			SkipCfgAboveSigma: skipCfgAboveSigma,
 			CfgRescale:        cfgRescale,
 			AqtPreset:         aqtPreset,
@@ -239,7 +244,7 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			DynamicThresholding:         dynamicThresholding,
 			ControlnetStrength:          1.0,
 			Legacy:                      false,
-			AddOriginalImage:            true,
+			AddOriginalImage:            normalizeBool(openAI.AddOriginalImage, true),
 			DeliberateEulerAncestralBug: false,
 			PreferBrownian:              true,
 		},
@@ -337,12 +342,13 @@ func parseOpenAISize(size string) (int, int, error) {
 	return width, height, nil
 }
 
-// 对齐到 64 的倍数（向下取整）
+// 对齐到最近的 64 倍数，避免自定义宽高被静默缩水（例如 1000 对齐到 1024 而不是 960）。
 func alignTo64(value int) int {
 	if value < 64 {
 		return 64
 	}
-	return (value / 64) * 64
+
+	return ((value + 32) / 64) * 64
 }
 
 // 映射 OpenAI quality 到 NovelAI steps + scale
@@ -370,42 +376,66 @@ func mapQualityToNovelAI(quality string, width, height int) (steps int, scale fl
 	}
 }
 
-// 解析 NovelAI 模型名（兼容简写）
+// resolveNovelAIModel 将前端传入的模型名解析为 NovelAI 标准模型 ID。
+// 支持简写（如 v3, v4.5）但使用词边界检测，避免 "anime-v3-style" 之类的子串误匹配。
 func resolveNovelAIModel(modelName string) string {
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
 
+	// 完全匹配已知模型 ID，直接返回。
 	switch modelName {
-	case "nai-diffusion-4-5-full", "nai-diffusion-4-5-curated", "nai-diffusion-4-full", "nai-diffusion-4-curated-preview", "nai-diffusion-3", "nai-diffusion-2", "nai-diffusion-furry":
+	case "nai-diffusion-4-5-full", "nai-diffusion-4-5-curated",
+		"nai-diffusion-4-full", "nai-diffusion-4-curated-preview",
+		"nai-diffusion-3", "nai-diffusion-2", "nai-diffusion-furry":
 		return modelName
 	}
 
-	// V4.5 模型（最新）
-	if strings.Contains(modelName, "4.5") || strings.Contains(modelName, "v4.5") || strings.Contains(modelName, "4-5") {
+	// 模糊匹配：使用分隔符边界防止 "xv3y" 匹配 "v3"。
+	// 例如 "nai-diffusion-4-5" 应匹配 V4.5，而 "anime-v3-style" 不应匹配 V3。
+	if containsModelKeyword(modelName, "4.5") || containsModelKeyword(modelName, "v4.5") || containsModelKeyword(modelName, "4-5") {
 		return "nai-diffusion-4-5-full"
 	}
-
-	// V4 模型
-	if strings.Contains(modelName, "nai-diffusion-4") || strings.Contains(modelName, "v4") {
+	if containsModelKeyword(modelName, "nai-diffusion-4") || containsModelKeyword(modelName, "v4") {
 		return "nai-diffusion-4-curated-preview"
 	}
-
-	// V3 模型
-	if strings.Contains(modelName, "nai-diffusion-3") || strings.Contains(modelName, "v3") {
+	if containsModelKeyword(modelName, "nai-diffusion-3") || containsModelKeyword(modelName, "v3") {
 		return "nai-diffusion-3"
 	}
-
-	// V2 模型
-	if strings.Contains(modelName, "nai-diffusion-2") || strings.Contains(modelName, "v2") {
+	if containsModelKeyword(modelName, "nai-diffusion-2") || containsModelKeyword(modelName, "v2") {
 		return "nai-diffusion-2"
 	}
-
-	// Furry 模型
-	if strings.Contains(modelName, "furry") {
+	if containsModelKeyword(modelName, "furry") {
 		return "nai-diffusion-furry"
 	}
 
-	// 默认使用最新的 V3 模型（更稳定，V4 需要订阅）
+	// 默认使用 V3 模型（更稳定，V4 需要订阅）
 	return "nai-diffusion-3"
+}
+
+// containsModelKeyword 检查 keyword 是否在 modelName 中以词边界出现。
+// 词边界为：字符串首尾、连字符、下划线、空格、点号。
+// 例如 "nai-diffusion-v4-5" 中 "v4" 的前后都是连字符 → 匹配。
+// "xv4y" 中 "v4" 前后都是字母 → 不匹配。
+func containsModelKeyword(modelName, keyword string) bool {
+	idx := strings.Index(modelName, keyword)
+	for idx >= 0 {
+		beforeOK := idx == 0 || !isModelNameChar(modelName[idx-1])
+		afterIdx := idx + len(keyword)
+		afterOK := afterIdx >= len(modelName) || !isModelNameChar(modelName[afterIdx])
+		if beforeOK && afterOK {
+			return true
+		}
+		next := strings.Index(modelName[idx+1:], keyword)
+		if next < 0 {
+			break
+		}
+		idx = idx + 1 + next
+	}
+	return false
+}
+
+// isModelNameChar 判断字符是否为"字母数字"（即非分隔符），用于词边界检测。
+func isModelNameChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 }
 
 func isNovelAIV4Model(model string) bool {

@@ -85,10 +85,34 @@ export function resolveNovelAIModelId(model: string | undefined) {
     const value = (model || "").toLowerCase().trim().replace(/_/g, "-");
     if (!value) return "nai-diffusion-3";
     if (QUALITY_TAGS[value]) return value;
-    if (value.includes("4.5") || value.includes("4-5")) return value.includes("curated") ? "nai-diffusion-4-5-curated" : "nai-diffusion-4-5-full";
-    if (value.includes("nai-diffusion-4") || value.includes("v4")) return value.includes("full") ? "nai-diffusion-4-full" : "nai-diffusion-4-curated-preview";
-    if (value.includes("furry")) return "nai-diffusion-furry-3";
+    // 使用词边界匹配，防止 "anime-v3-style" 之类的子串误匹配
+    if (hasModelKeyword(value, "4.5") || hasModelKeyword(value, "v4.5") || hasModelKeyword(value, "4-5")) return value.includes("curated") ? "nai-diffusion-4-5-curated" : "nai-diffusion-4-5-full";
+    if (hasModelKeyword(value, "nai-diffusion-4") || hasModelKeyword(value, "v4")) return value.includes("full") ? "nai-diffusion-4-full" : "nai-diffusion-4-curated-preview";
+    if (hasModelKeyword(value, "nai-diffusion-3") || hasModelKeyword(value, "v3")) return "nai-diffusion-3";
+    if (hasModelKeyword(value, "furry")) return "nai-diffusion-furry-3";
     return "nai-diffusion-3";
+}
+
+/**
+ * 检查 keyword 是否在 model 中以词边界出现。
+ * 词边界为：字符串首尾、连字符、空格、点号。
+ * 例如 "nai-diffusion-v4-5" 中 "v4" 前后都是连字符 → 匹配。
+ * "xv4y" 中 "v4" 前后都是字母 → 不匹配。
+ */
+function hasModelKeyword(model: string, keyword: string): boolean {
+    let idx = model.indexOf(keyword);
+    while (idx >= 0) {
+        const beforeOk = idx === 0 || !isModelNameChar(model.charCodeAt(idx - 1));
+        const afterIdx = idx + keyword.length;
+        const afterOk = afterIdx >= model.length || !isModelNameChar(model.charCodeAt(afterIdx));
+        if (beforeOk && afterOk) return true;
+        idx = model.indexOf(keyword, idx + 1);
+    }
+    return false;
+}
+
+function isModelNameChar(c: number): boolean {
+    return (c >= 97 && c <= 122) || (c >= 48 && c <= 57); // a-z or 0-9
 }
 
 export function normalizeNovelAIQualityPreset(value: unknown): NovelAIQualityPreset {

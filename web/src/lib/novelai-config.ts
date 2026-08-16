@@ -51,6 +51,8 @@ export function normalizeNovelAISettings(config: Partial<NovelAISettings>): Nove
         novelAIDivideRoles: Boolean(merged.novelAIDivideRoles),
         novelAIUseAutoPositioning: Boolean(merged.novelAIUseAutoPositioning),
         novelAICharacterPrompts: normalizeNovelAICharacterPrompts(merged.novelAICharacterPrompts),
+        novelAIQualityToggle: merged.novelAIQualityToggle !== false,
+        novelAIAddOriginalImage: merged.novelAIAddOriginalImage !== false,
     };
 }
 
@@ -75,6 +77,8 @@ export function buildNovelAIRequestParameters(config: Partial<NovelAISettings>):
         divide_roles: settings.novelAIDivideRoles,
         use_auto_positioning: settings.novelAIUseAutoPositioning,
         character_prompts: settings.novelAICharacterPrompts.map(({ characterPromptTokens, characterNegativePromptTokens, ...prompt }) => prompt),
+        quality_toggle: settings.novelAIQualityToggle,
+        add_original_image: settings.novelAIAddOriginalImage,
     };
 }
 
