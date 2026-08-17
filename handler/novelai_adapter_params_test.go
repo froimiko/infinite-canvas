@@ -179,6 +179,49 @@ func TestConvertToNovelAIRequestDisabledUsesNonePreset(t *testing.T) {
 	}
 }
 
+// 前端云端模型值带 `渠道id::` 前缀，必须在发送前用 modelOptionName 剥掉。
+// 这里锁住后端侧的兜底：即使漏剥，也不能把整串当成模型名发给上游。
+// 现象回顾：`__cloud__::nai-diffusion-4-5-full` 靠模糊匹配侥幸命中 V4.5，
+// 但反复切换模型会叠成 `__cloud__::__cloud__::...`，最终 502。
+func TestResolveNovelAIModelStripsChannelPrefix(t *testing.T) {
+	tests := []struct {
+		input  string
+		expect string
+	}{
+		{"__cloud__::nai-diffusion-4-5-full", "nai-diffusion-4-5-full"},
+		{"__cloud__::nai-diffusion-4-5-curated", "nai-diffusion-4-5-curated"},
+		{"__cloud__::nai-diffusion-4-full", "nai-diffusion-4-full"},
+		{"__cloud__::nai-diffusion-3", "nai-diffusion-3"},
+		{"__cloud__::__cloud__::nai-diffusion-4-5-full", "nai-diffusion-4-5-full"},
+		{"ch-abc123::nai-diffusion-4-5-curated", "nai-diffusion-4-5-curated"},
+	}
+	for _, tt := range tests {
+		if got := resolveNovelAIModel(tt.input); got != tt.expect {
+			t.Errorf("resolveNovelAIModel(%q) = %q, want %q", tt.input, got, tt.expect)
+		}
+	}
+}
+
+// 参考实现里不存在 aqtPreset 这个字段，任何模型都不能发送。
+func TestConvertToNovelAIRequestNeverSendsAqtPreset(t *testing.T) {
+	for _, model := range []string{"nai-diffusion-3", "nai-diffusion-4-full", "nai-diffusion-4-5-full", "nai-diffusion-4-5-curated"} {
+		req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+			Prompt:         "1girl, solo",
+			NegativePrompt: "bad hands",
+			Size:           "832x1216",
+			NovelAIEnabled: true,
+			NovelAIModel:   model,
+		})
+		body, err := json.Marshal(req.Parameters)
+		if err != nil {
+			t.Fatalf("marshal parameters: %v", err)
+		}
+		if strings.Contains(strings.ToLower(string(body)), "aqt") {
+			t.Fatalf("%s payload must not contain aqtPreset: %s", model, string(body))
+		}
+	}
+}
+
 // 锁定"前端只传模型和尺寸"时的上游默认值，逐项对齐 Aaalice_NAI_Launcher 的 ImageParams。
 // 这些默认值直接决定出图观感：sampler / cfg_rescale / noise_schedule / smea / decrisp
 // 任何一项漂移都会让 28 步的图看起来像没跑完（发软、发平、细节丢失）。

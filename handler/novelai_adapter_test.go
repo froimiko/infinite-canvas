@@ -150,7 +150,6 @@ func TestConvertToNovelAIRequestEnabledOverridesParameters(t *testing.T) {
 		SMDyn:               boolPtr(true),
 		DynamicThresholding: boolPtr(true),
 		VarietyPlus:         boolPtr(true),
-		AqtPreset:           "anime",
 	})
 
 	if req.Model != "nai-diffusion-4-5-curated" {
@@ -185,9 +184,6 @@ func TestConvertToNovelAIRequestEnabledOverridesParameters(t *testing.T) {
 	}
 	if req.Parameters.SkipCfgAboveSigma == nil {
 		t.Fatal("variety_plus should set skip_cfg_above_sigma")
-	}
-	if req.Parameters.AqtPreset != "anime" {
-		t.Fatalf("aqtPreset = %q, want override", req.Parameters.AqtPreset)
 	}
 }
 
@@ -255,7 +251,6 @@ func TestConvertToNovelAIRequestEnabledV3OmitsV4OnlyFields(t *testing.T) {
 		Size:           "1024x1024",
 		NovelAIEnabled: true,
 		NovelAIModel:   "nai-diffusion-3",
-		AqtPreset:      "safe",
 		DivideRoles:    true,
 		CharacterPrompts: []novelAICharacterPromptInput{
 			{DisplayName: "Alice", CharacterPrompt: "alice", CharacterNegativePrompt: "bad alice", Coords: &novelAIGridCoords{X: 2, Y: 2}},

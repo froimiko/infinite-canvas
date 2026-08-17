@@ -67,7 +67,6 @@ type novelAIParameters struct {
 	QualityToggle     bool     `json:"qualityToggle"`
 	SkipCfgAboveSigma *float64 `json:"skip_cfg_above_sigma"` // Variety+: 非 nil 为开启，nil 为关闭
 	CfgRescale        float64  `json:"cfg_rescale"`
-	AqtPreset         string   `json:"aqtPreset,omitempty"`
 
 	// V4 结构化 Prompt
 	V4Prompt         *v4PromptStructure             `json:"v4_prompt,omitempty"`
@@ -170,7 +169,6 @@ type openAIImageRequest struct {
 	SMDyn                *bool                         `json:"sm_dyn"`
 	DynamicThresholding  *bool                         `json:"dynamic_thresholding"`
 	VarietyPlus          *bool                         `json:"variety_plus"`
-	AqtPreset            string                        `json:"aqt_preset"`
 	DivideRoles          bool                          `json:"divide_roles"`
 	UseAutoPositioning   bool                          `json:"use_auto_positioning"`
 	CharacterPrompts     []novelAICharacterPromptInput `json:"character_prompts"`
@@ -205,7 +203,6 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 	smDyn := boolPtr(false)
 	dynamicThresholding := false
 	var skipCfgAboveSigma *float64
-	aqtPreset := ""
 
 	if openAI.NovelAIEnabled {
 		model = resolveNovelAIModel(firstNonEmpty(openAI.NovelAIModel, openAI.Model))
@@ -232,7 +229,6 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 		// NAI4 会拒绝/忽略 SMEA，参考实现直接删除 sm/sm_dyn；这里用 omitempty 指针避免发送。
 		sm = nil
 		smDyn = nil
-		aqtPreset = normalizeNovelAIAqtPreset(openAI.AqtPreset, "safe")
 		// V4 不支持 native，参考实现同样在此回退为 karras。
 		if noiseSchedule == "native" {
 			noiseSchedule = "karras"
@@ -273,7 +269,6 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			QualityToggle:     normalizeBool(openAI.QualityToggle, true),
 			SkipCfgAboveSigma: skipCfgAboveSigma,
 			CfgRescale:        cfgRescale,
-			AqtPreset:         aqtPreset,
 
 			// 固定参数（NovelAI RequestParameters 支持字段）
 			NoiseSchedule:                      noiseSchedule,
@@ -423,6 +418,17 @@ func mapQualityToNovelAI(quality string, width, height int) (steps int, scale fl
 // 支持简写（如 v3, v4.5）但使用词边界检测，避免 "anime-v3-style" 之类的子串误匹配。
 func resolveNovelAIModel(modelName string) string {
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
+
+	// 兜底剥掉前端的 `渠道id::` 前缀（可能叠了多层）。
+	// 正常路径下前端已用 modelOptionName 处理过，这里只是防止漏剥时
+	// 把整串当模型名发给上游，造成模糊匹配错位甚至 502。
+	for {
+		index := strings.LastIndex(modelName, "::")
+		if index < 0 {
+			break
+		}
+		modelName = strings.TrimSpace(modelName[index+2:])
+	}
 
 	// 完全匹配已知模型 ID，直接返回。
 	switch modelName {
@@ -583,16 +589,6 @@ func normalizeNovelAINoiseSchedule(value, fallback string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch value {
 	case "native", "karras", "exponential", "polyexponential":
-		return value
-	default:
-		return fallback
-	}
-}
-
-func normalizeNovelAIAqtPreset(value, fallback string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	switch value {
-	case "safe", "nai", "full", "balanced", "anime", "furry", "pony":
 		return value
 	default:
 		return fallback

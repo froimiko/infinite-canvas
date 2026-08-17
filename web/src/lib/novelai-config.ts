@@ -1,5 +1,6 @@
 import { DEFAULT_NOVELAI_SETTINGS, NOVELAI_AQT_PRESETS, NOVELAI_NOISE_SCHEDULES, NOVELAI_SAMPLERS, NOVELAI_UC_PRESETS } from "@/components/novelai/novelai-constants";
 import { normalizePromptBlockTokens } from "@/components/prompt-block-editor/prompt-block-utils";
+import { modelOptionName } from "@/stores/use-config-store";
 import type { NovelAICharacterPrompt, NovelAISettings } from "@/types/image";
 
 export function isNovelAIModel(model: string) {
@@ -61,7 +62,11 @@ export function buildNovelAIRequestParameters(config: Partial<NovelAISettings>):
     if (!settings.novelAIEnabled) return {};
     return {
         novelai_enabled: true,
-        novelai_model: settings.novelAIModel,
+        // 必须用 modelOptionName 去掉 `渠道id::` 前缀。
+        // 云端模型的值形如 `__cloud__::nai-diffusion-4-5-full`，整串发给后端会让
+        // resolveNovelAIModel 只能走模糊匹配（甚至匹配失败回落到 V3），
+        // 反复切换模型还会叠成 `__cloud__::__cloud__::...` 导致上游 502。
+        novelai_model: modelOptionName(settings.novelAIModel),
         sampler: settings.novelAISampler,
         steps: settings.novelAISteps,
         cfg_scale: settings.novelAICfgScale,
@@ -73,7 +78,6 @@ export function buildNovelAIRequestParameters(config: Partial<NovelAISettings>):
         sm_dyn: settings.novelAISmDyn,
         dynamic_thresholding: settings.novelAIDynamicThresholding,
         variety_plus: settings.novelAIVarietyPlus,
-        aqt_preset: settings.novelAIAqtPreset,
         divide_roles: settings.novelAIDivideRoles,
         use_auto_positioning: settings.novelAIUseAutoPositioning,
         character_prompts: settings.novelAICharacterPrompts.map(({ characterPromptTokens, characterNegativePromptTokens, ...prompt }) => prompt),
