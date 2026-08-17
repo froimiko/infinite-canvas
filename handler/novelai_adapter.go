@@ -3,6 +3,7 @@ package handler
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -38,7 +39,7 @@ func novelAIDebugEnabled() bool {
 	}
 }
 
-var novelAIFreeGenerationLocks sync.Map // map[string]*sync.Mutex，key 为 baseURL+APIKey 的 SHA-256，避免泄露 Token。
+var novelAIFreeGenerationLocks sync.Map // map[string]chan struct{}，key 为 baseURL+APIKey 的 SHA-256，避免泄露 Token。
 
 // NovelAI API 请求结构（完整 V4/V4.5 规范）
 type novelAIRequest struct {
@@ -797,9 +798,9 @@ func proxyNovelAIImageRequest(w http.ResponseWriter, r *http.Request, body []byt
 	var requestErr error
 	succeededCount := requestCount
 	if forceSingleRequests && requestCount > 1 {
-		data, succeededCount, requestErr = requestNovelAISingleImageBatch(openAIReq, requestCount, channel)
+		data, succeededCount, requestErr = requestNovelAISingleImageBatch(r.Context(), openAIReq, requestCount, channel)
 	} else {
-		data, requestErr = requestNovelAIImageData(channel, sampleReq)
+		data, requestErr = requestNovelAIImageData(r.Context(), channel, sampleReq)
 	}
 	if requestErr != nil {
 		if err := service.RefundUserCredits(user.ID, sampleReq.Model, totalCredits, "/images/generations"); err != nil {
@@ -834,7 +835,7 @@ type novelAIImageBatchResult struct {
 	Err   error
 }
 
-func requestNovelAISingleImageBatch(openAIReq openAIImageRequest, count int, channel model.ModelChannel) ([]map[string]interface{}, int, error) {
+func requestNovelAISingleImageBatch(ctx context.Context, openAIReq openAIImageRequest, count int, channel model.ModelChannel) ([]map[string]interface{}, int, error) {
 	resultCh := make(chan novelAIImageBatchResult, count)
 	for index := 0; index < count; index++ {
 		go func(index int) {
@@ -850,7 +851,7 @@ func requestNovelAISingleImageBatch(openAIReq openAIImageRequest, count int, cha
 				resultCh <- novelAIImageBatchResult{Index: index, Err: err}
 				return
 			}
-			data, err := requestNovelAIImageData(channel, naiReq)
+			data, err := requestNovelAIImageData(ctx, channel, naiReq)
 			resultCh <- novelAIImageBatchResult{Index: index, Data: data, Err: err}
 		}(index)
 	}
@@ -887,16 +888,30 @@ func requestNovelAISingleImageBatch(openAIReq openAIImageRequest, count int, cha
 	return merged, succeededCount, nil
 }
 
-func withNovelAIFreeGenerationLock(channel model.ModelChannel, fn func() ([]map[string]interface{}, error)) ([]map[string]interface{}, error) {
+// withNovelAIFreeGenerationLock 在免费生图锁下串行执行 fn。
+// 等锁期间必须响应 ctx 取消：反代 502 后客户端已断开，若还在这里死等，
+// 请求会持续堆积、锁越排越长，表现为"之后每次都 502，只能删控件"。
+func withNovelAIFreeGenerationLock(ctx context.Context, channel model.ModelChannel, fn func() ([]map[string]interface{}, error)) ([]map[string]interface{}, error) {
 	if channel.FreeGenerationLock == nil || !channel.FreeGenerationLock.Enabled {
 		return fn()
 	}
 
 	key := novelAIFreeGenerationLockKey(channel)
-	value, _ := novelAIFreeGenerationLocks.LoadOrStore(key, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
+	value, _ := novelAIFreeGenerationLocks.LoadOrStore(key, make(chan struct{}, 1))
+	slot := value.(chan struct{})
+
+	// 用带缓冲 channel 当可取消的互斥量：sync.Mutex 的 Lock 无法被 ctx 打断。
+	select {
+	case slot <- struct{}{}:
+	case <-ctx.Done():
+		return nil, errors.New("请求已取消")
+	}
+	defer func() { <-slot }()
+
+	// 拿到锁后再确认一次：可能是在排队期间断开的。
+	if ctx.Err() != nil {
+		return nil, errors.New("请求已取消")
+	}
 
 	return fn()
 }
@@ -910,7 +925,15 @@ func novelAIFreeGenerationLockKey(channel model.ModelChannel) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func requestNovelAIImageData(channel model.ModelChannel, naiReq *novelAIRequest) ([]map[string]interface{}, error) {
+// novelAIHTTPClient 专用客户端。
+// 必须设超时：V4.5 Full 单张就要 10s+，用 http.DefaultClient（零超时）意味着
+// 上游卡住时 goroutine 会永久持有免费生图锁，把后续所有请求一起拖死。
+var novelAIHTTPClient = &http.Client{Timeout: 5 * time.Minute}
+
+// requestNovelAIImageData 向上游发起一次生图请求。
+// ctx 来自客户端请求，反代超时/用户取消时会被取消，从而尽快释放免费生图锁，
+// 避免"前端已 502、后端还在跑"导致后续请求排队雪崩。
+func requestNovelAIImageData(ctx context.Context, channel model.ModelChannel, naiReq *novelAIRequest) ([]map[string]interface{}, error) {
 	naiBody, err := json.Marshal(naiReq)
 	if err != nil {
 		return nil, errors.New("构建 NovelAI 请求失败")
@@ -923,16 +946,22 @@ func requestNovelAIImageData(channel model.ModelChannel, naiReq *novelAIRequest)
 	}
 
 	naiURL := buildNovelAIURL(channel.BaseURL, "/ai/generate-image")
-	request, err := http.NewRequest(http.MethodPost, naiURL, bytes.NewReader(naiBody))
-	if err != nil {
-		return nil, errors.New("创建 NovelAI 请求失败")
-	}
-	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
-	request.Header.Set("Content-Type", "application/json")
 
-	return withNovelAIFreeGenerationLock(channel, func() ([]map[string]interface{}, error) {
-		response, err := http.DefaultClient.Do(request)
+	return withNovelAIFreeGenerationLock(ctx, channel, func() ([]map[string]interface{}, error) {
+		// 请求在锁内构建：等锁期间若客户端已断开，就不必再打上游。
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, naiURL, bytes.NewReader(naiBody))
 		if err != nil {
+			return nil, errors.New("创建 NovelAI 请求失败")
+		}
+		request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+		request.Header.Set("Content-Type", "application/json")
+
+		response, err := novelAIHTTPClient.Do(request)
+		if err != nil {
+			if ctx.Err() != nil {
+				log.Printf("NovelAI request canceled by client: url=%s", naiURL)
+				return nil, errors.New("请求已取消")
+			}
 			log.Printf("NovelAI request failed: url=%s err=%v", naiURL, err)
 			return nil, errors.New("NovelAI 接口请求失败")
 		}

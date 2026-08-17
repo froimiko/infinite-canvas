@@ -32,11 +32,19 @@ export function normalizeNovelAICharacterPrompts(prompts: unknown): NovelAIChara
         .slice(0, 6);
 }
 
-export function normalizeNovelAISettings(config: Partial<NovelAISettings>): NovelAISettings {
+/**
+ * 归一化 NovelAI 设置。
+ *
+ * 注意 novelAIModel 的兜底顺序：画布 NovelAI 节点创建时 novelAIModel 故意留空
+ * （让 ModelPicker 显示全局默认模型），此时必须回落到 config.model / imageModel，
+ * 绝不能直接落到 DEFAULT_NOVELAI_SETTINGS.novelAIModel（V3）——否则下拉里显示
+ * V4.5 Full、实际却按 V3 出图，连质量词都会取成 V3 的那一套。
+ */
+export function normalizeNovelAISettings(config: Partial<NovelAISettings> & { model?: string; imageModel?: string }): NovelAISettings {
     const merged = { ...DEFAULT_NOVELAI_SETTINGS, ...config };
     return {
         novelAIEnabled: Boolean(merged.novelAIEnabled),
-        novelAIModel: String(merged.novelAIModel || DEFAULT_NOVELAI_SETTINGS.novelAIModel),
+        novelAIModel: String(merged.novelAIModel?.trim() || config.model?.trim() || config.imageModel?.trim() || DEFAULT_NOVELAI_SETTINGS.novelAIModel),
         novelAISampler: oneOf(String(merged.novelAISampler), NOVELAI_SAMPLERS, DEFAULT_NOVELAI_SETTINGS.novelAISampler),
         novelAISteps: clampInteger(merged.novelAISteps, 1, 50, DEFAULT_NOVELAI_SETTINGS.novelAISteps),
         novelAICfgScale: clampNumber(merged.novelAICfgScale, 1, 25, DEFAULT_NOVELAI_SETTINGS.novelAICfgScale),

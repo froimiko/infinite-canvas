@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"sync/atomic"
 	"strings"
@@ -350,7 +351,7 @@ func TestWithNovelAIFreeGenerationLockSerializesSameToken(t *testing.T) {
 	done := make(chan error, 2)
 
 	call := func(id int) {
-		_, err := withNovelAIFreeGenerationLock(channel, func() ([]map[string]interface{}, error) {
+		_, err := withNovelAIFreeGenerationLock(context.Background(), channel, func() ([]map[string]interface{}, error) {
 			current := atomic.AddInt32(&active, 1)
 			for {
 				max := atomic.LoadInt32(&maxActive)
@@ -413,7 +414,7 @@ func TestWithNovelAIFreeGenerationLockAllowsDifferentTokens(t *testing.T) {
 	done := make(chan error, 2)
 
 	go func() {
-		_, err := withNovelAIFreeGenerationLock(channelA, func() ([]map[string]interface{}, error) {
+		_, err := withNovelAIFreeGenerationLock(context.Background(), channelA, func() ([]map[string]interface{}, error) {
 			close(startedA)
 			<-releaseA
 			return []map[string]interface{}{{"token": "a"}}, nil
@@ -423,7 +424,7 @@ func TestWithNovelAIFreeGenerationLockAllowsDifferentTokens(t *testing.T) {
 	<-startedA
 
 	go func() {
-		_, err := withNovelAIFreeGenerationLock(channelB, func() ([]map[string]interface{}, error) {
+		_, err := withNovelAIFreeGenerationLock(context.Background(), channelB, func() ([]map[string]interface{}, error) {
 			return []map[string]interface{}{{"token": "b"}}, nil
 		})
 		done <- err
