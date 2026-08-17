@@ -17,7 +17,7 @@ import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { normalizeNovelAISettings } from "@/lib/novelai-config";
-import { applyNovelAIQualityTags, applyNovelAIUcPreset, normalizeNovelAIQualityPreset, normalizeNovelAIUcPreset, resolveNovelAIModelId } from "@/components/novelai/novelai-presets";
+import { applyNovelAIQualityTags, applyNovelAIUcPreset, normalizeNovelAIQualityPreset, normalizeNovelAIUcPreset, novelAIUcPresetApiName, resolveNovelAIModelId } from "@/components/novelai/novelai-presets";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -2063,13 +2063,19 @@ function InfiniteCanvasPage() {
                     const negativePrompt = isNovelAINode ? applyNovelAIUcPreset(sourceNode?.metadata?.naNegativePrompt || "", presetModel, normalizeNovelAIUcPreset(sourceNode?.metadata?.naUcPreset)) : (sourceNode?.metadata?.naNegativePrompt || "").trim();
                     const requestOptions = negativePrompt ? { negativePrompt } : undefined;
                     const requestPrompt = isNovelAINode ? applyNovelAIQualityTags(effectivePrompt, presetModel, normalizeNovelAIQualityPreset(sourceNode?.metadata?.naQualityPreset)) : effectivePrompt;
-                    // NovelAI 节点的 qualityToggle / addOriginalImage 需要随请求发送给后端。
+                    // NovelAI 节点的 qualityToggle / addOriginalImage / ucPreset 需要随请求发送给后端。
+                    // ucPreset 必须跟随「负面质量词」下拉，否则上游仍按默认 Heavy 预设叠加一份负面词。
                     const naQualityToggle = isNovelAINode ? normalizeNovelAIQualityPreset(sourceNode?.metadata?.naQualityPreset) !== "none" : undefined;
                     const naAddOriginalImage = isNovelAINode ? sourceNode?.metadata?.naAddOriginalImage : undefined;
-                    const novelAIGenerationConfig =
-                        naQualityToggle !== undefined || naAddOriginalImage !== undefined
-                            ? { ...generationConfig, ...(naQualityToggle !== undefined ? { novelAIQualityToggle: naQualityToggle } : {}), ...(naAddOriginalImage !== undefined ? { novelAIAddOriginalImage: naAddOriginalImage } : {}) }
-                            : generationConfig;
+                    const naUcPresetName = isNovelAINode ? novelAIUcPresetApiName(normalizeNovelAIUcPreset(sourceNode?.metadata?.naUcPreset)) : undefined;
+                    const novelAIGenerationConfig = isNovelAINode
+                        ? {
+                              ...generationConfig,
+                              ...(naQualityToggle !== undefined ? { novelAIQualityToggle: naQualityToggle } : {}),
+                              ...(naAddOriginalImage !== undefined ? { novelAIAddOriginalImage: naAddOriginalImage } : {}),
+                              ...(naUcPresetName ? { novelAIUcPreset: naUcPresetName } : {}),
+                          }
+                        : generationConfig;
                     const generationMetadata = buildImageGenerationMetadata(generationType, novelAIGenerationConfig, count, referenceImages, promptTokens);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];

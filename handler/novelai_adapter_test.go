@@ -168,8 +168,8 @@ func TestConvertToNovelAIRequestEnabledOverridesParameters(t *testing.T) {
 	if req.Parameters.Seed != 123456 {
 		t.Fatalf("seed = %d, want override", req.Parameters.Seed)
 	}
-	if req.Parameters.UCPreset != 2 {
-		t.Fatalf("ucPreset = %d, want Light mapping", req.Parameters.UCPreset)
+	if req.Parameters.UCPreset != 1 {
+		t.Fatalf("ucPreset = %d, want Light mapping (1)", req.Parameters.UCPreset)
 	}
 	if req.Parameters.CfgRescale != 0.42 {
 		t.Fatalf("cfg_rescale = %v, want override", req.Parameters.CfgRescale)
@@ -180,8 +180,8 @@ func TestConvertToNovelAIRequestEnabledOverridesParameters(t *testing.T) {
 	if req.Parameters.SM != nil || req.Parameters.SMDyn != nil {
 		t.Fatal("V4 request should omit sm/sm_dyn")
 	}
-	if !req.Parameters.DynamicThresholding {
-		t.Fatal("dynamic_thresholding should use enabled override")
+	if req.Parameters.DynamicThresholding {
+		t.Fatal("dynamic_thresholding must be false for V4 models (Decrisp is V3-only)")
 	}
 	if req.Parameters.SkipCfgAboveSigma == nil {
 		t.Fatal("variety_plus should set skip_cfg_above_sigma")
@@ -267,10 +267,14 @@ func TestConvertToNovelAIRequestEnabledV3OmitsV4OnlyFields(t *testing.T) {
 		t.Fatalf("marshal request: %v", err)
 	}
 	payload := string(body)
-	for _, forbidden := range []string{"\"aqtPreset\"", "\"v4_prompt\"", "\"v4_negative_prompt\"", "\"characterPrompts\""} {
+	for _, forbidden := range []string{"\"aqtPreset\"", "\"v4_prompt\"", "\"v4_negative_prompt\"", "\"characterPrompts\"", "\"legacy_v3_extend\"", "\"use_coords\""} {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("V3 enabled payload should not contain %s: %s", forbidden, payload)
 		}
+	}
+	// V3 必须携带 uc（负面提示词冗余字段），与参考实现一致。
+	if !strings.Contains(payload, "\"uc\"") {
+		t.Fatalf("V3 enabled payload should contain uc field: %s", payload)
 	}
 }
 

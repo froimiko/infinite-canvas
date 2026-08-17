@@ -150,3 +150,22 @@ export function applyNovelAIUcPreset(negativePrompt: string, model: string, pres
     if (!trimmed) return tags;
     return `${tags}, ${trimmed}`;
 }
+
+/**
+ * 把编辑器里的负面质量词下拉映射为后端 uc_preset 名称。
+ * 后端会再转成 NovelAI 官方整数（Heavy=0/Light=1/Human Focus=2/None=3）。
+ * Furry 在官方 API 里没有对应整数，预设词已在本地注入，因此按「无预设」上报，
+ * 避免发送非法值让上游回落到默认 Heavy 预设、叠加出双份负面词。
+ */
+export function novelAIUcPresetApiName(preset: NovelAIUcPreset): "Heavy" | "Light" | "Human Focus" | "None" {
+    switch (preset) {
+        case "heavy":
+            return "Heavy";
+        case "light":
+            return "Light";
+        case "human":
+            return "Human Focus";
+        default:
+            return "None";
+    }
+}

@@ -55,20 +55,25 @@ type novelAIParameters struct {
 	AqtPreset         string   `json:"aqtPreset,omitempty"`
 
 	// V4 结构化 Prompt
-	V4Prompt         *v4PromptStructure `json:"v4_prompt,omitempty"`
-	V4NegativePrompt *v4PromptStructure `json:"v4_negative_prompt,omitempty"`
+	V4Prompt         *v4PromptStructure             `json:"v4_prompt,omitempty"`
+	V4NegativePrompt *v4NegativePromptStructure     `json:"v4_negative_prompt,omitempty"`
 	CharacterPrompts []novelAICharacterPromptCompat `json:"characterPrompts,omitempty"`
 
 	// 固定参数（保持兼容性）
-	NoiseSchedule               string  `json:"noise_schedule"`
-	SM                          *bool   `json:"sm,omitempty"`
-	SMDyn                       *bool   `json:"sm_dyn,omitempty"`
-	DynamicThresholding         bool    `json:"dynamic_thresholding"`
-	ControlnetStrength          float64 `json:"controlnet_strength"`
-	Legacy                      bool    `json:"legacy"`
-	AddOriginalImage            bool    `json:"add_original_image"`
-	DeliberateEulerAncestralBug bool    `json:"deliberate_euler_ancestral_bug"`
-	PreferBrownian              bool    `json:"prefer_brownian"`
+	NoiseSchedule                    string  `json:"noise_schedule"`
+	SM                               *bool   `json:"sm,omitempty"`
+	SMDyn                            *bool   `json:"sm_dyn,omitempty"`
+	DynamicThresholding              bool    `json:"dynamic_thresholding"`
+	ControlnetStrength               float64 `json:"controlnet_strength"`
+	Legacy                           bool    `json:"legacy"`
+	AddOriginalImage                 bool    `json:"add_original_image"`
+	DeliberateEulerAncestralBug      bool    `json:"deliberate_euler_ancestral_bug"`
+	PreferBrownian                   bool    `json:"prefer_brownian"`
+	AutoSmea                           bool  `json:"autoSmea"`
+	NormalizeReferenceStrengthMultiple bool  `json:"normalize_reference_strength_multiple"`
+	LegacyV3Extend                     *bool `json:"legacy_v3_extend,omitempty"` // V4 专用
+	UseCoords                          *bool `json:"use_coords,omitempty"`       // V4 专用：顶层副本
+	UC                                 string `json:"uc,omitempty"`              // V3 专用：负面提示词冗余字段
 
 	// img2img 参数（Phase 3）
 	Image    string  `json:"image,omitempty"`
@@ -76,12 +81,20 @@ type novelAIParameters struct {
 	Noise    float64 `json:"noise,omitempty"`
 }
 
-// V4 Prompt 结构（用于多角色控制）
+// v4PromptStructure 是 v4_prompt 的载荷（正面提示词）。
+// 参考实现只在正面结构里发送 use_coords / use_order。
 type v4PromptStructure struct {
 	Caption   v4Caption `json:"caption"`
 	UseCoords bool      `json:"use_coords"`
 	UseOrder  bool      `json:"use_order"`
-	LegacyUC  bool      `json:"legacy_uc,omitempty"` // 仅用于 negative_prompt
+}
+
+// v4NegativePromptStructure 是 v4_negative_prompt 的载荷（负面提示词）。
+// 参考实现只发送 caption + legacy_uc，多发 use_coords / use_order 会让上游
+// 按不同分支解析负面词，导致负面约束强度与网页端不一致。
+type v4NegativePromptStructure struct {
+	Caption  v4Caption `json:"caption"`
+	LegacyUC bool      `json:"legacy_uc"`
 }
 
 type v4Caption struct {
@@ -170,7 +183,7 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 	model := resolveNovelAIModel(openAI.Model)
 	sampler := "k_euler_ancestral"
 	seed := int64(0)
-	ucPreset := 4 // 旧逻辑保持既有 None/关闭预设行为。
+	ucPreset := 3 // 非 NovelAI 扩展分支保持"无预设"，对应 API 值 3。
 	cfgRescale := 0.0
 	noiseSchedule := "karras"
 	sm := boolPtr(false)
@@ -185,14 +198,14 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 		scale = normalizeNovelAICfgScale(openAI.CfgScale, 5.0)
 		sampler = normalizeNovelAISampler(openAI.Sampler, "k_euler")
 		seed = normalizeNovelAISeed(openAI.Seed)
-		ucPreset = normalizeNovelAIUCPreset(openAI.UCPreset, 3) // 前端默认 Heavy；当前推荐映射 Heavy=3。
+		ucPreset = normalizeNovelAIUCPreset(openAI.UCPreset, 0) // 前端默认 Heavy，对应 API 值 0。
 		cfgRescale = normalizeNovelAICfgRescale(openAI.CfgRescale, 0.18)
 		noiseSchedule = normalizeNovelAINoiseSchedule(openAI.NoiseSchedule, "native")
 		sm = boolPtr(normalizeBool(openAI.SM, true))
 		smDyn = boolPtr(normalizeBool(openAI.SMDyn, true))
 		dynamicThresholding = normalizeBool(openAI.DynamicThresholding, true)
 		if normalizeBool(openAI.VarietyPlus, false) {
-			skipCfgAboveSigma = calculateSkipCfgAboveSigma(model, width, height)
+			skipCfgAboveSigma = calculateSkipCfgAboveSigma(width, height)
 		}
 	}
 
@@ -212,6 +225,13 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 
 	// 质量词由前端按模型注入，这里不再追加，避免与前端预设重复。
 	fullPrompt := openAI.Prompt
+
+	// uc 是 V3 时代的负面提示词冗余字段，参考实现仅在非 V4 模型下发送。
+	// V4 使用 v4_negative_prompt 承载负面词，多发 uc 会造成负面词被重复解析。
+	v3UC := ""
+	if !isV4Model {
+		v3UC = negativePrompt
+	}
 
 	// 构建 NovelAI 请求
 	naiReq := &novelAIRequest{
@@ -238,15 +258,18 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			AqtPreset:         aqtPreset,
 
 			// 固定参数（NovelAI RequestParameters 支持字段）
-			NoiseSchedule:               noiseSchedule,
-			SM:                          sm,
-			SMDyn:                       smDyn,
-			DynamicThresholding:         dynamicThresholding,
-			ControlnetStrength:          1.0,
-			Legacy:                      false,
-			AddOriginalImage:            normalizeBool(openAI.AddOriginalImage, true),
-			DeliberateEulerAncestralBug: false,
-			PreferBrownian:              true,
+			NoiseSchedule:                      noiseSchedule,
+			SM:                                 sm,
+			SMDyn:                              smDyn,
+			DynamicThresholding:                dynamicThresholding,
+			ControlnetStrength:                 1.0,
+			Legacy:                             false,
+			AddOriginalImage:                   normalizeBool(openAI.AddOriginalImage, true),
+			DeliberateEulerAncestralBug:        false,
+			PreferBrownian:                     true,
+			AutoSmea:                           false,
+			NormalizeReferenceStrengthMultiple: true,
+			UC:                                 v3UC,
 		},
 	}
 
@@ -280,14 +303,16 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			UseOrder:  true,
 		}
 
-		naiReq.Parameters.V4NegativePrompt = &v4PromptStructure{
+		// 参考实现在 V4 分支额外写入这两个顶层字段。
+		naiReq.Parameters.UseCoords = boolPtr(useCoords)
+		naiReq.Parameters.LegacyV3Extend = boolPtr(false)
+
+		naiReq.Parameters.V4NegativePrompt = &v4NegativePromptStructure{
 			Caption: v4Caption{
 				BaseCaption:  negativePrompt,
 				CharCaptions: v4NegativeCharCaptions,
 			},
-			UseCoords: useCoords,
-			UseOrder:  true,
-			LegacyUC:  false,
+			LegacyUC: false,
 		}
 	}
 
@@ -507,18 +532,23 @@ func randomNovelAISeed() int64 {
 	return time.Now().UnixNano() & 0xffffffff
 }
 
+// normalizeNovelAIUCPreset 把前端 UC Preset 名称映射为 NovelAI API 的整数值。
+// 取值与 Aaalice_NAI_Launcher 的 UcPresets.toApiValue 完全一致：
+//
+//	Heavy = 0, Light = 1, Human Focus = 2, None = 3
+//
+// 注意不要与 NAI 早期版本的显示顺序（Heavy=4/Light=5/...）混淆，
+// 发错值会让上游按另一套预设跑，直接造成画风与质量偏移。
 func normalizeNovelAIUCPreset(value string, fallback int) int {
-	// 前端 UC Preset 推荐映射：None=0, Light=2, Heavy=3, Human Focus=1。
-	// NovelAI 历史实现里 None 也曾使用 4；这里仅在 novelai_enabled=true 时按前端显式参数映射。
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "none":
+	case "heavy":
 		return 0
 	case "light":
-		return 2
-	case "heavy":
-		return 3
-	case "human focus", "human_focus", "human-focus":
 		return 1
+	case "human focus", "human_focus", "human-focus":
+		return 2
+	case "none":
+		return 3
 	default:
 		return fallback
 	}
@@ -551,19 +581,13 @@ func normalizeNovelAIAqtPreset(value, fallback string) string {
 	}
 }
 
-func calculateSkipCfgAboveSigma(model string, width, height int) *float64 {
+// calculateSkipCfgAboveSigma 计算 Variety+ 的 skip_cfg_above_sigma。
+// 系数与 Aaalice_NAI_Launcher 保持一致：所有模型统一使用 58.0，不按模型区分。
+// 之前按模型分 19.0/59.0 会让 Variety+ 行为明显偏离官方网页端，造成画风漂移。
+func calculateSkipCfgAboveSigma(width, height int) *float64 {
 	w := float64(width) / 8
 	h := float64(height) / 8
-	v := math.Sqrt(4.0 * w * h / 63232)
-	var value float64
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "nai-diffusion-4-full":
-		value = 19.0 * v
-	case "nai-diffusion-4-5-curated":
-		value = 59.0 * v
-	default:
-		value = 19.0 * v
-	}
+	value := 58.0 * math.Sqrt(4.0*w*h/63232)
 	return &value
 }
 
