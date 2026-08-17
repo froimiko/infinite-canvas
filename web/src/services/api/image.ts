@@ -106,6 +106,8 @@ const IMAGE_MAX_PIXELS = 8294400;
 const IMAGE_MAX_EDGE = 3840;
 const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
+// NovelAI 上游最大边（后端 parseOpenAISize 也按 2048 截断）。
+const NOVELAI_MAX_EDGE = 2048;
 
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
@@ -173,6 +175,28 @@ function resolveRequestSize(quality: string | undefined, size: string) {
     }
     if (value.includes(":")) return resolveSize(quality, value);
     throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
+}
+
+/**
+ * NovelAI 的尺寸规则和通用 OpenAI 模型完全不同，不能共用 validateImageSize：
+ * - NovelAI 要求 64 的倍数（通用规则是 16）
+ * - NovelAI 支持 512x768 / 640x640 这类小图，而通用规则有 655360 像素下限
+ * - NovelAI 官方分辨率里 1088x1920 等比例也超出通用的 3:1 判定余量
+ * 用通用规则校验会让「小尺寸」整组直接抛错，表现为"尺寸选择无效"。
+ * 这里只做 NovelAI 自己的约束，其余交给后端 parseOpenAISize 兜底对齐。
+ */
+function resolveNovelAIRequestSize(size: string) {
+    const value = size.trim();
+    if (!value || value.toLowerCase() === "auto") return undefined;
+    const dimensions = parseImageDimensions(value);
+    if (!dimensions) {
+        if (value.includes(":")) return undefined; // 比例写法交给后端按默认尺寸处理
+        throw new Error("NovelAI 图像尺寸格式不支持，请使用 1024x1024 这类写法");
+    }
+    const { width, height } = dimensions;
+    if (width < 64 || height < 64) throw new Error("NovelAI 图像尺寸的宽高不能小于 64");
+    if (width > NOVELAI_MAX_EDGE || height > NOVELAI_MAX_EDGE) throw new Error(`NovelAI 图像尺寸的宽高不能超过 ${NOVELAI_MAX_EDGE}px`);
+    return `${width}x${height}`;
 }
 
 function resolveImageDataUrl(item: Record<string, unknown>) {
@@ -623,7 +647,9 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         }
     }
     const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
+    // NovelAI 走自己的尺寸规则，不能被通用校验（16 倍数 / 655360 像素下限）拦掉。
+    const useNovelAISize = Boolean(config.novelAIEnabled);
+    const requestSize = useNovelAISize ? resolveNovelAIRequestSize(config.size) : resolveRequestSize(quality, config.size);
     const negativePrompt = normalizedNegativePrompt(options);
     try {
         const response = await axios.post<ImageApiResponse>(
@@ -664,7 +690,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         }
     }
     const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
+    // NovelAI 走自己的尺寸规则，不能被通用校验（16 倍数 / 655360 像素下限）拦掉。
+    const useNovelAISize = Boolean(config.novelAIEnabled);
+    const requestSize = useNovelAISize ? resolveNovelAIRequestSize(config.size) : resolveRequestSize(quality, config.size);
     const negativePrompt = normalizedNegativePrompt(options);
     const formData = new FormData();
     formData.set("model", requestConfig.model);
