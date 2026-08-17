@@ -39,7 +39,8 @@ const NOISE_LABELS: Record<string, string> = {
 export function NovelAIParamsPanel({ metadata, theme, onChange }: NovelAIParamsPanelProps) {
     const { width, height } = parseNovelAISize(metadata.size);
     const steps = clamp(Number(metadata.novelAISteps ?? 28), 1, 50);
-    const cfgScale = clamp(Number(metadata.novelAICfgScale ?? 6), 1, 25);
+    const cfgScale = clamp(Number(metadata.novelAICfgScale ?? 5), 1, 25);
+    const cfgRescale = clamp(Number(metadata.novelAICfgRescale ?? 0), 0, 1);
     const seed = Number(metadata.novelAISeed ?? -1);
     const seedLocked = Boolean(metadata.naSeedLocked);
     const count = Math.max(1, Math.min(MAX_COUNT, Math.floor(Math.abs(Number(metadata.count)) || 1)));
@@ -92,7 +93,7 @@ export function NovelAIParamsPanel({ metadata, theme, onChange }: NovelAIParamsP
 
             <div className="na-field">
                 <div className="na-label">采样器</div>
-                <NativeSelect value={metadata.novelAISampler || "k_euler"} options={NOVELAI_SAMPLERS.map((value) => ({ value, label: SAMPLER_LABELS[value] || value }))} onChange={(value) => onChange({ novelAISampler: value })} />
+                <NativeSelect value={metadata.novelAISampler || "k_euler_ancestral"} options={NOVELAI_SAMPLERS.map((value) => ({ value, label: SAMPLER_LABELS[value] || value }))} onChange={(value) => onChange({ novelAISampler: value })} />
             </div>
 
             <div className="na-field">
@@ -120,6 +121,11 @@ export function NovelAIParamsPanel({ metadata, theme, onChange }: NovelAIParamsP
                     </button>
                 </div>
                 <input className="na-slider" type="range" min={1} max={25} step={0.1} value={cfgScale} onChange={(event) => onChange({ novelAICfgScale: Number(event.target.value) })} />
+            </div>
+
+            <div className="na-field">
+                <div className="na-label">CFG Rescale: {cfgRescale.toFixed(2)}</div>
+                <input className="na-slider" type="range" min={0} max={1} step={0.01} value={cfgRescale} onChange={(event) => onChange({ novelAICfgRescale: Number(event.target.value) })} />
             </div>
 
             <div className="na-field">

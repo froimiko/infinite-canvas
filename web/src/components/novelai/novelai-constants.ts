@@ -16,19 +16,24 @@ export const NOVELAI_AQT_PRESETS: NovelAIAqtPreset[] = ["safe", "nai", "full", "
 
 export const NOVELAI_DEFAULT_NEGATIVE_PROMPT = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry";
 
+// 默认值逐项对齐 Aaalice_NAI_Launcher 的 ImageParams（lib/data/models/image/image_params.dart）。
+// 这些默认值直接决定出图观感，改动前请先核对参考实现，不要凭直觉给"看起来更好"的值：
+// sampler=k_euler_ancestral、cfg_rescale=0、noise_schedule=karras、smea/smea_dyn/decrisp=false。
+// 历史上这里把 sampler 写成 k_euler、cfg_rescale 写成 0.18、noise_schedule 写成 native、
+// decrisp/smea 写成 true，出图会明显发软发平，像"步数没跑完"。
 export const DEFAULT_NOVELAI_SETTINGS: NovelAISettings = {
     novelAIEnabled: false,
     novelAIModel: "nai-diffusion-3",
-    novelAISampler: "k_euler",
+    novelAISampler: "k_euler_ancestral",
     novelAISteps: 28,
     novelAICfgScale: 5,
     novelAISeed: -1,
     novelAIUcPreset: "Heavy",
-    novelAICfgRescale: 0.18,
-    novelAINoiseSchedule: "native",
-    novelAISm: true,
-    novelAISmDyn: true,
-    novelAIDynamicThresholding: true,
+    novelAICfgRescale: 0,
+    novelAINoiseSchedule: "karras",
+    novelAISm: false,
+    novelAISmDyn: false,
+    novelAIDynamicThresholding: false,
     novelAIVarietyPlus: false,
     novelAIAqtPreset: "safe",
     novelAIDivideRoles: false,

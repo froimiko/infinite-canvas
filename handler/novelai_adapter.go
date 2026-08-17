@@ -15,6 +15,8 @@ import (
 	"math"
 	"math/big"
 	"net/http"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +24,19 @@ import (
 	"github.com/basketikun/infinite-canvas/model"
 	"github.com/basketikun/infinite-canvas/service"
 )
+
+// novelAIDebugEnabled 由环境变量 NOVELAI_DEBUG_LOG=1 开启。
+// 开启后会打印发往上游的完整请求参数与返回 ZIP 的条目清单，
+// 用于和官方网页端/参考启动器的请求逐字段对照排查画质问题。
+// Authorization 头不在请求体内，因此这里的日志不含 Token。
+func novelAIDebugEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("NOVELAI_DEBUG_LOG"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
 
 var novelAIFreeGenerationLocks sync.Map // map[string]*sync.Mutex，key 为 baseURL+APIKey 的 SHA-256，避免泄露 Token。
 
@@ -196,14 +211,17 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 		model = resolveNovelAIModel(firstNonEmpty(openAI.NovelAIModel, openAI.Model))
 		steps = normalizeNovelAISteps(openAI.Steps, 28)
 		scale = normalizeNovelAICfgScale(openAI.CfgScale, 5.0)
-		sampler = normalizeNovelAISampler(openAI.Sampler, "k_euler")
+		// 下列 fallback 必须与 Aaalice_NAI_Launcher 的 ImageParams 默认值一致，
+		// 否则前端未显式传值时会静默切到另一套画风：
+		// sampler=k_euler_ancestral、cfg_rescale=0、noise_schedule=karras、smea/decrisp=false。
+		sampler = normalizeNovelAISampler(openAI.Sampler, "k_euler_ancestral")
 		seed = normalizeNovelAISeed(openAI.Seed)
 		ucPreset = normalizeNovelAIUCPreset(openAI.UCPreset, 0) // 前端默认 Heavy，对应 API 值 0。
-		cfgRescale = normalizeNovelAICfgRescale(openAI.CfgRescale, 0.18)
-		noiseSchedule = normalizeNovelAINoiseSchedule(openAI.NoiseSchedule, "native")
-		sm = boolPtr(normalizeBool(openAI.SM, true))
-		smDyn = boolPtr(normalizeBool(openAI.SMDyn, true))
-		dynamicThresholding = normalizeBool(openAI.DynamicThresholding, true)
+		cfgRescale = normalizeNovelAICfgRescale(openAI.CfgRescale, 0)
+		noiseSchedule = normalizeNovelAINoiseSchedule(openAI.NoiseSchedule, "karras")
+		sm = boolPtr(normalizeBool(openAI.SM, false))
+		smDyn = boolPtr(normalizeBool(openAI.SMDyn, false))
+		dynamicThresholding = normalizeBool(openAI.DynamicThresholding, false)
 		if normalizeBool(openAI.VarietyPlus, false) {
 			skipCfgAboveSigma = calculateSkipCfgAboveSigma(width, height)
 		}
@@ -677,15 +695,29 @@ func extractNovelAIImageData(zipData []byte) ([]map[string]interface{}, error) {
 		return nil, fmt.Errorf("解压 NovelAI 响应失败: %w", err)
 	}
 
-	// 查找所有图片文件
-	data := make([]map[string]interface{}, 0, len(zipReader.File))
+	// 收集图片条目并按文件名排序。
+	// NovelAI 的 ZIP 条目顺序不保证稳定，直接按归档顺序取第一张有可能拿到
+	// 中间预览帧（表现为"步数没跑完"的糊图）。按名字排序后 image_0 恒定在前，
+	// 多图批量也能保证顺序与请求一致。
+	files := make([]*zip.File, 0, len(zipReader.File))
 	for _, file := range zipReader.File {
-		// 跳过目录和非图片文件
 		if file.FileInfo().IsDir() || !isImageFile(file.Name) {
 			continue
 		}
+		files = append(files, file)
+	}
+	sort.SliceStable(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 
-		// 读取图片内容
+	if novelAIDebugEnabled() {
+		names := make([]string, 0, len(zipReader.File))
+		for _, file := range zipReader.File {
+			names = append(names, fmt.Sprintf("%s(%d bytes)", file.Name, file.UncompressedSize64))
+		}
+		log.Printf("[novelai-debug] zip entries=%d detail=%s", len(zipReader.File), strings.Join(names, ", "))
+	}
+
+	data := make([]map[string]interface{}, 0, len(files))
+	for _, file := range files {
 		rc, err := file.Open()
 		if err != nil {
 			continue
@@ -886,6 +918,12 @@ func requestNovelAIImageData(channel model.ModelChannel, naiReq *novelAIRequest)
 	naiBody, err := json.Marshal(naiReq)
 	if err != nil {
 		return nil, errors.New("构建 NovelAI 请求失败")
+	}
+
+	if novelAIDebugEnabled() {
+		// 打印完整请求体，方便和官方网页端 / Aaalice_NAI_Launcher 的请求逐字段对照。
+		// Token 在 Authorization 头里，不会出现在这段日志中。
+		log.Printf("[novelai-debug] request body=%s", string(naiBody))
 	}
 
 	naiURL := buildNovelAIURL(channel.BaseURL, "/ai/generate-image")

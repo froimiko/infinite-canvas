@@ -178,3 +178,78 @@ func TestConvertToNovelAIRequestDisabledUsesNonePreset(t *testing.T) {
 		t.Fatalf("ucPreset = %d, want 3 (none) when NovelAI extension is off", req.Parameters.UCPreset)
 	}
 }
+
+// 锁定"前端只传模型和尺寸"时的上游默认值，逐项对齐 Aaalice_NAI_Launcher 的 ImageParams。
+// 这些默认值直接决定出图观感：sampler / cfg_rescale / noise_schedule / smea / decrisp
+// 任何一项漂移都会让 28 步的图看起来像没跑完（发软、发平、细节丢失）。
+// 想看完整请求体：go test ./handler/ -run GoldenDefaults -v
+func TestConvertToNovelAIRequestGoldenDefaults(t *testing.T) {
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Prompt:         "1girl, solo",
+		NegativePrompt: "bad hands",
+		Size:           "832x1216",
+		NovelAIEnabled: true,
+		NovelAIModel:   "nai-diffusion-4-5-full",
+	})
+
+	if req.Parameters.Sampler != "k_euler_ancestral" {
+		t.Errorf("sampler = %q, want k_euler_ancestral", req.Parameters.Sampler)
+	}
+	if req.Parameters.CfgRescale != 0 {
+		t.Errorf("cfg_rescale = %v, want 0", req.Parameters.CfgRescale)
+	}
+	if req.Parameters.NoiseSchedule != "karras" {
+		t.Errorf("noise_schedule = %q, want karras", req.Parameters.NoiseSchedule)
+	}
+	if req.Parameters.Steps != 28 {
+		t.Errorf("steps = %d, want 28", req.Parameters.Steps)
+	}
+	if req.Parameters.Scale != 5.0 {
+		t.Errorf("scale = %v, want 5.0", req.Parameters.Scale)
+	}
+	if req.Parameters.DynamicThresholding {
+		t.Error("dynamic_thresholding should default to false")
+	}
+	if req.Parameters.SkipCfgAboveSigma != nil {
+		t.Errorf("skip_cfg_above_sigma should be null when Variety+ is off, got %v", *req.Parameters.SkipCfgAboveSigma)
+	}
+	if req.Parameters.UCPreset != 0 {
+		t.Errorf("ucPreset = %d, want 0 (Heavy)", req.Parameters.UCPreset)
+	}
+	if !req.Parameters.QualityToggle {
+		t.Error("qualityToggle should default to true")
+	}
+
+	body, err := json.MarshalIndent(req, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	t.Logf("golden upstream request:\n%s", string(body))
+}
+
+// V3 分支同样要用参考默认值（V3 才会真正发送 sm / sm_dyn / dynamic_thresholding）。
+func TestConvertToNovelAIRequestV3GoldenDefaults(t *testing.T) {
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Prompt:         "1girl, solo",
+		NegativePrompt: "bad hands",
+		Size:           "832x1216",
+		NovelAIEnabled: true,
+		NovelAIModel:   "nai-diffusion-3",
+	})
+
+	if req.Parameters.SM == nil || req.Parameters.SMDyn == nil {
+		t.Fatal("V3 request should send sm / sm_dyn")
+	}
+	if *req.Parameters.SM {
+		t.Error("sm should default to false")
+	}
+	if *req.Parameters.SMDyn {
+		t.Error("sm_dyn should default to false")
+	}
+	if req.Parameters.DynamicThresholding {
+		t.Error("dynamic_thresholding (decrisp) should default to false")
+	}
+	if req.Parameters.NoiseSchedule != "karras" {
+		t.Errorf("noise_schedule = %q, want karras", req.Parameters.NoiseSchedule)
+	}
+}
