@@ -23,6 +23,14 @@ type NovelAIParamsPanelProps = {
      * inline：生图工作台内嵌平铺（100% 宽、无阴影、无边框）。
      */
     variant?: "popover" | "inline";
+    /**
+     * metadata 里没有模型时的兜底（通常传全局 imageModel）。
+     *
+     * 画布 NovelAI 节点创建时 novelAIModel/model 都是空的（让 ModelPicker 显示全局默认），
+     * 不传这个兜底会让 resolveNovelAIModelId 拿到空串并回落 V3，
+     * 于是首次打开面板时 isV4 判定为 false —— V4 模型下也不会标注「native 不可用」。
+     */
+    fallbackModel?: string;
 };
 
 const SAMPLER_LABELS: Record<string, string> = {
@@ -41,7 +49,7 @@ const NOISE_LABELS: Record<string, string> = {
     polyexponential: "Polyexponential",
 };
 
-export function NovelAIParamsPanel({ metadata, theme, onChange, variant = "popover" }: NovelAIParamsPanelProps) {
+export function NovelAIParamsPanel({ metadata, theme, onChange, variant = "popover", fallbackModel }: NovelAIParamsPanelProps) {
     const { width, height } = parseNovelAISize(metadata.size);
     const steps = clamp(Number(metadata.novelAISteps ?? 28), 1, 50);
     const cfgScale = clamp(Number(metadata.novelAICfgScale ?? 5), 1, 25);
@@ -49,7 +57,7 @@ export function NovelAIParamsPanel({ metadata, theme, onChange, variant = "popov
     const seed = Number(metadata.novelAISeed ?? -1);
     const seedLocked = Boolean(metadata.naSeedLocked);
     const count = Math.max(1, Math.min(MAX_COUNT, Math.floor(Math.abs(Number(metadata.count)) || 1)));
-    const modelId = resolveNovelAIModelId(metadata.novelAIModel || metadata.model);
+    const modelId = resolveNovelAIModelId(metadata.novelAIModel || metadata.model || fallbackModel);
     const isV4 = modelId.startsWith("nai-diffusion-4");
     // 默认关闭，所以用 === true 判定（!== false 会让 undefined 变成开启）。
     const qualityToggle = metadata.naQualityToggle === true;

@@ -299,3 +299,31 @@ func TestConvertToNovelAIRequestV3GoldenDefaults(t *testing.T) {
 		t.Errorf("noise_schedule = %q, want karras", req.Parameters.NoiseSchedule)
 	}
 }
+
+// 回归：novelai_model 传了非 NovelAI 的模型名（例如画布节点首次生成时误把全局默认
+// 模型 gpt-image-2 当成 NovelAI 模型发过来）时，后端会静默回落 nai-diffusion-3。
+//
+// 这层回落本身是必要的兜底，但它意味着**前端发错模型名后端不会报错**，
+// 症状是"下拉显示 V4.5、实际按 V3 出图"。所以前端 buildGenerationConfig 必须
+// 显式把已解析的模型传给 normalizeNovelAISettings，不能让空值落到 config.model。
+// 这个测试固定住回落行为，避免以后有人把回落改成报错或改成别的模型。
+func TestResolveNovelAIModelFallsBackForNonNovelAINames(t *testing.T) {
+	cases := []string{
+		"gpt-image-2",
+		"__cloud__::gpt-image-2",
+		"gpt-5.5",
+		"seedream-3",
+		"",
+		"   ",
+	}
+	for _, name := range cases {
+		if got := resolveNovelAIModel(name); got != "nai-diffusion-3" {
+			t.Errorf("resolveNovelAIModel(%q) = %q, want nai-diffusion-3 (兜底)", name, got)
+		}
+	}
+
+	// 反向确认：正常的 NovelAI 模型名不会被误伤。
+	if got := resolveNovelAIModel("__cloud__::nai-diffusion-4-5-full"); got != "nai-diffusion-4-5-full" {
+		t.Errorf("resolveNovelAIModel(cloud v4.5 full) = %q, want nai-diffusion-4-5-full", got)
+	}
+}

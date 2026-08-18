@@ -161,7 +161,7 @@ export function NovelAINodePanel({ node, isRunning, onConfigChange, onGenerate, 
             {paramsOpen && paramsRect
                 ? createPortal(
                       <div ref={paramsPanelRef} style={paramsPanelStyle(paramsRect)}>
-                          <NovelAIParamsPanel metadata={metadata} theme={theme} onChange={(patch) => onConfigChange(node.id, patch)} />
+                          <NovelAIParamsPanel metadata={metadata} theme={theme} fallbackModel={globalConfig.imageModel || globalConfig.model} onChange={(patch) => onConfigChange(node.id, patch)} />
                       </div>,
                       document.body,
                   )

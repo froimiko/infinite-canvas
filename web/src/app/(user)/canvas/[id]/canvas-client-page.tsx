@@ -3367,9 +3367,10 @@ function getInputSummary(inputs: NodeGenerationInput[]) {
 
 function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
+    const resolvedModel = node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model);
     return {
         ...config,
-        model: node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
+        model: resolvedModel,
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
         size: node?.metadata?.size || config.size || defaultConfig.size,
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
@@ -3381,7 +3382,15 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
         count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
-        ...normalizeNovelAISettings({ ...config, ...node?.metadata }),
+        // 必须把已解析出的 resolvedModel 显式传进去当兜底。
+        //
+        // 画布 NovelAI 节点创建时 novelAIModel 故意留空（让 ModelPicker 显示全局默认模型），
+        // 而 normalizeNovelAISettings 的兜底顺序是 novelAIModel → model → imageModel。
+        // 如果只传 { ...config, ...metadata }，空的 novelAIModel 会落到 config.model
+        // ——那是全局「默认模型」（常见 gpt-image-2 / gpt-5.5 这类非 NAI 模型），
+        // 后端 resolveNovelAIModel 匹配不到 NAI 关键字就回落 nai-diffusion-3。
+        // 症状：下拉里显示 V4.5，第一次生成实际按 V3 出图，手动切一次模型才正常。
+        ...normalizeNovelAISettings({ ...config, ...node?.metadata, model: resolvedModel }),
     };
 }
 
