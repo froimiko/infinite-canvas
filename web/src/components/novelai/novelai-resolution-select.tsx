@@ -12,6 +12,14 @@ const DROPDOWN_MARGIN = 12;
 const DROPDOWN_GAP = 4;
 const DROPDOWN_MAX_HEIGHT = 300;
 
+/**
+ * 本组件的下拉被 portal 到 body，不在高级参数面板的 DOM 子树里。
+ * 外层面板判断"点击是否发生在面板外"时必须放行带这个标记的元素，
+ * 否则 pointerdown 阶段面板就被关掉、下拉随之卸载，click 永远不会触发，
+ * 表现为"选了尺寸没反应，而且面板自己关了"。
+ */
+export const NOVELAI_PORTAL_DROPDOWN_ATTR = "data-na-portal-dropdown";
+
 type NovelAIResolutionSelectProps = {
     value?: string;
     theme: CanvasTheme;
@@ -53,7 +61,7 @@ export function NovelAIResolutionSelect({ value, theme, onChange }: NovelAIResol
             </button>
             {open && rect && typeof document !== "undefined"
                 ? createPortal(
-                      <div ref={dropdownRef} className="na-dropdown-portal" style={dropdownStyle(rect, theme)} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+                      <div ref={dropdownRef} className="na-dropdown-portal" {...{ [NOVELAI_PORTAL_DROPDOWN_ATTR]: "true" }} style={dropdownStyle(rect, theme)} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
                           {NOVELAI_RESOLUTION_GROUPS.map((group) => (
                               <div key={group.label}>
                                   <div className="na-dropdown__group">{group.label}</div>

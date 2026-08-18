@@ -10,6 +10,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { NovelAIParamsPanel } from "./novelai-params-panel";
+import { NOVELAI_PORTAL_DROPDOWN_ATTR } from "./novelai-resolution-select";
 import { NOVELAI_QUALITY_PRESET_OPTIONS, NOVELAI_UC_PRESET_OPTIONS, normalizeNovelAIQualityPreset, normalizeNovelAIUcPreset } from "./novelai-presets";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/app/(user)/canvas/types";
 
@@ -45,6 +46,11 @@ export function NovelAINodePanel({ node, isRunning, onConfigChange, onGenerate, 
             const target = event.target;
             if (!(target instanceof Node)) return;
             if (paramsButtonRef.current?.contains(target) || paramsPanelRef.current?.contains(target)) return;
+            // 面板内的自定义下拉（如图像尺寸）被 portal 到 body，不在 paramsPanelRef 子树里。
+            // 这里必须放行，否则 pointerdown 阶段就把面板关掉、下拉随之卸载，
+            // click 永远不会触发 —— 表现为"选了尺寸没反应，面板还自己关了"。
+            const element = target instanceof Element ? target : target.parentElement;
+            if (element?.closest(`[${NOVELAI_PORTAL_DROPDOWN_ATTR}]`)) return;
             setParamsOpen(false);
         };
         syncPosition();
