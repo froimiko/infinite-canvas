@@ -279,3 +279,71 @@ func TestYoudaoTranslatorRejectsLongTextAndUpstreamError(t *testing.T) {
 		t.Fatalf("error = %v, want upstream error code 108", err)
 	}
 }
+
+func TestApplyPromptTranslationDirection(t *testing.T) {
+	base := promptTranslationTestSetting(model.PromptTranslationServiceAlibaba)
+	autoSource := base
+	autoSource.SourceLanguage = "auto"
+	latinPair := base
+	latinPair.TargetLanguage = "fr"
+
+	cases := []struct {
+		name       string
+		setting    model.PromptTranslationSetting
+		text       string
+		direction  string
+		wantSource string
+		wantTarget string
+	}{
+		{name: "empty direction keeps config", setting: base, text: "一个女孩", direction: "", wantSource: "en", wantTarget: "zh"},
+		{name: "config direction keeps config", setting: base, text: "一个女孩", direction: "config", wantSource: "en", wantTarget: "zh"},
+		{name: "auto swaps for chinese text", setting: base, text: "一个女孩，站在雨里", direction: "auto", wantSource: "zh", wantTarget: "en"},
+		{name: "auto swaps for kana text", setting: base, text: "かわいい", direction: "auto", wantSource: "zh", wantTarget: "en"},
+		{name: "auto keeps config for latin text", setting: base, text: "1girl, solo, best quality", direction: "auto", wantSource: "en", wantTarget: "zh"},
+		{name: "auto keeps config when target is not cjk", setting: latinPair, text: "一个女孩", direction: "auto", wantSource: "en", wantTarget: "fr"},
+		{name: "reverse swaps regardless of text", setting: base, text: "1girl", direction: "REVERSE", wantSource: "zh", wantTarget: "en"},
+		{name: "auto source never swaps", setting: autoSource, text: "一个女孩", direction: "reverse", wantSource: "auto", wantTarget: "zh"},
+		{name: "unknown direction keeps config", setting: base, text: "一个女孩", direction: "zh->en", wantSource: "en", wantTarget: "zh"},
+	}
+	for _, item := range cases {
+		t.Run(item.name, func(t *testing.T) {
+			got := applyPromptTranslationDirection(item.setting, item.text, item.direction)
+			if got.SourceLanguage != item.wantSource || got.TargetLanguage != item.wantTarget {
+				t.Fatalf("direction %q: got %s -> %s, want %s -> %s", item.direction, got.SourceLanguage, got.TargetLanguage, item.wantSource, item.wantTarget)
+			}
+		})
+	}
+}
+
+func TestContainsCJKAndIsCJKLanguage(t *testing.T) {
+	textCases := map[string]bool{
+		"1girl, solo":     false,
+		"best quality!":   false,
+		"一个女孩":            true,
+		"猫耳 girl":         true,
+		"かわいい":            true,
+		"カタカナ":            true,
+		"한국어":             true,
+	}
+	for text, want := range textCases {
+		if got := containsCJK(text); got != want {
+			t.Fatalf("containsCJK(%q) = %v, want %v", text, got, want)
+		}
+	}
+
+	langCases := map[string]bool{
+		"zh":      true,
+		"zh-Hans": true,
+		"zh_CHS":  true,
+		"ja":      true,
+		"ko":      true,
+		"en":      false,
+		"fr":      false,
+		"":        false,
+	}
+	for lang, want := range langCases {
+		if got := isCJKLanguage(lang); got != want {
+			t.Fatalf("isCJKLanguage(%q) = %v, want %v", lang, got, want)
+		}
+	}
+}

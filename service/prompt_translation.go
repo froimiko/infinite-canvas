@@ -31,11 +31,85 @@ const (
 
 // TranslatePromptText translates user text with the saved private translation setting.
 func TranslatePromptText(text string) (string, error) {
+	return TranslatePromptTextWithDirection(text, "")
+}
+
+// TranslatePromptTextWithDirection 按调用方指定的方向翻译文本。
+//
+// direction 只接受三种值，故意不接受裸语言码：语言对属于后台私有设置，
+// 允许前端直接传语言码等于把私有配置暴露成可绕过的入参。
+//
+//	""/"config" —— 完全按后台配置的 源语言 → 目标语言（历史行为）
+//	"reverse"   —— 交换后台配置的源/目标语言
+//	"auto"      —— 文本已经是目标语言（CJK）时自动交换，否则按配置
+func TranslatePromptTextWithDirection(text string, direction string) (string, error) {
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return "", err
 	}
-	return translatePromptText(text, normalizePrivateSetting(settings.Private).PromptTranslation)
+	setting := normalizePrivateSetting(settings.Private).PromptTranslation
+	return translatePromptText(text, applyPromptTranslationDirection(setting, text, direction))
+}
+
+// applyPromptTranslationDirection 根据 direction 决定是否交换源/目标语言。
+//
+// 生图工作台的「一键翻译」用 auto：用户写中文时需要英文提示词（zh → en），
+// 粘贴英文提示词时需要中文释义（en → zh），而后台只配置了一个方向。
+//
+// 两条硬约束：
+//  1. 源语言为 auto 时永不交换 —— 交换会把目标语言变成 auto，
+//     而 checkPromptTranslation 明确拒绝目标语言为 auto。
+//  2. auto 只在目标语言属于 CJK 时生效。非 CJK 语言对（例如 en → fr）
+//     无法靠字符集判断文本语言，一律退回配置方向，避免瞎猜。
+func applyPromptTranslationDirection(setting model.PromptTranslationSetting, text string, direction string) model.PromptTranslationSetting {
+	source := strings.ToLower(strings.TrimSpace(setting.SourceLanguage))
+	target := strings.ToLower(strings.TrimSpace(setting.TargetLanguage))
+	if source == "" || target == "" || source == "auto" {
+		return setting
+	}
+
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "reverse":
+	case "auto":
+		if !isCJKLanguage(target) || !containsCJK(text) {
+			return setting
+		}
+	default:
+		return setting
+	}
+
+	setting.SourceLanguage, setting.TargetLanguage = target, source
+	return setting
+}
+
+// containsCJK 判断文本里是否出现汉字/假名/谚文，用于「文本已经是中日韩」的粗判。
+func containsCJK(text string) bool {
+	for _, char := range text {
+		switch {
+		case char >= 0x3040 && char <= 0x30FF: // 平假名 / 片假名
+			return true
+		case char >= 0x3400 && char <= 0x4DBF: // 扩展 A 区汉字
+			return true
+		case char >= 0x4E00 && char <= 0x9FFF: // 基本区汉字
+			return true
+		case char >= 0xAC00 && char <= 0xD7AF: // 谚文音节
+			return true
+		case char >= 0xF900 && char <= 0xFAFF: // 兼容汉字
+			return true
+		}
+	}
+	return false
+}
+
+// isCJKLanguage 判断语言码是否属于中日韩，兼容 zh-hans / zh-chs / ja-jp 这类变体。
+func isCJKLanguage(lang string) bool {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	for _, prefix := range []string{"zh", "ja", "jp", "ko", "kr", "yue"} {
+		if lang == prefix || strings.HasPrefix(lang, prefix+"-") || strings.HasPrefix(lang, prefix+"_") {
+			return true
+		}
+	}
+	return false
 }
 
 // TestPromptTranslation translates text with an admin provided setting that may not be saved yet.

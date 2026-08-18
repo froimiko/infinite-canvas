@@ -26,6 +26,9 @@ type promptTagTranslationsRequest struct {
 
 type promptNetworkTranslationRequest struct {
 	Text string `json:"text"`
+	// Direction 只允许 ""/"config"（按后台配置）、"auto"（按文本自适应）、"reverse"（反向）。
+	// 语言码属于后台私有设置，不接受前端直接指定。
+	Direction string `json:"direction"`
 }
 
 type promptTranslationTestRequest struct {
@@ -99,7 +102,7 @@ func PromptTagTranslations(w http.ResponseWriter, r *http.Request) {
 func PromptNetworkTranslation(w http.ResponseWriter, r *http.Request) {
 	var request promptNetworkTranslationRequest
 	_ = json.NewDecoder(r.Body).Decode(&request)
-	translated, err := service.TranslatePromptText(request.Text)
+	translated, err := service.TranslatePromptTextWithDirection(request.Text, request.Direction)
 	if err != nil {
 		FailError(w, err)
 		return

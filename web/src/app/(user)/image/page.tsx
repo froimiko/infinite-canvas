@@ -1,21 +1,15 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { CheckSquare, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Image, Modal, Tag, Tooltip, Typography } from "antd";
+import { App, Button, Checkbox, Drawer, Empty, Image, Modal, Segmented, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 
-import { ImageSettingsPanel } from "@/components/image-settings-panel";
-import { ModelPicker } from "@/components/model-picker";
-import { PromptBlockEditor } from "@/components/prompt-block-editor";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
-import { canvasThemes } from "@/lib/canvas-theme";
-import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { normalizeNovelAISettings } from "@/lib/novelai-config";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { useThemeStore } from "@/stores/use-theme-store";
+import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
@@ -23,6 +17,9 @@ import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/ima
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { NovelAISettings, ReferenceImage } from "@/types/image";
 import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
+import { GeneralGenerationPanel } from "./components/general-generation-panel";
+import { GenerationSettings } from "./components/generation-settings";
+import { NovelAIGenerationPlaceholder } from "./components/novelai-generation-placeholder";
 
 type GeneratedImage = {
     id: string;
@@ -42,12 +39,21 @@ type GenerationResult = {
     error?: string;
 };
 
+/** 生成记录所属标签页。缺省（老记录）按通用生图处理。 */
+type GenerationMode = "general" | "novelai";
+
 type GenerationLog = {
     id: string;
     createdAt: number;
+    /** 记录来自哪个标签页，决定恢复时要不要回写 NovelAI 参数。 */
+    mode: GenerationMode;
     title: string;
     prompt: string;
+    /** 一键翻译的译文。只用于恢复界面显示，从不参与生成。 */
+    promptTranslation?: string;
+    /** 历史字段：积木块提示词。通用生图已改纯文本框，仅为兼容老记录保留。 */
     promptTokens?: PromptBlockToken[];
+    /** 历史字段：负面提示词（NAI）。通用生图已移除该输入，仅为兼容老记录保留。 */
     negativePrompt?: string;
     negativePromptTokens?: PromptBlockToken[];
     time: string;
@@ -66,8 +72,6 @@ type GenerationLog = {
 };
 
 type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count"> & NovelAISettings;
-
-type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
 const NOVELAI_CONFIG_KEYS = [
     "novelAIEnabled",
@@ -91,6 +95,10 @@ const NOVELAI_CONFIG_KEYS = [
 
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
+const WORKBENCH_TABS = [
+    { value: "general", label: "通用生图" },
+    { value: "novelai", label: "novelai生图" },
+] as const;
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
 
 export default function ImagePage() {
@@ -102,10 +110,9 @@ export default function ImagePage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const [activeTab, setActiveTab] = useState<GenerationMode>("general");
     const [prompt, setPrompt] = useState("");
-    const [promptTokens, setPromptTokens] = useState<PromptBlockToken[]>([]);
-    const [negativePrompt, setNegativePrompt] = useState("");
-    const [negativePromptTokens, setNegativePromptTokens] = useState<PromptBlockToken[]>([]);
+    const [promptTranslation, setPromptTranslation] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
@@ -166,6 +173,12 @@ export default function ImagePage() {
         }
     };
 
+    /** 与提示词框互换原文/译文。译文只是查看用，交换后进模型的永远是提示词框里的内容。 */
+    const swapPromptTranslation = () => {
+        setPrompt(promptTranslation);
+        setPromptTranslation(prompt);
+    };
+
     const generate = async () => {
         const text = prompt.trim();
         if (!text) {
@@ -210,10 +223,9 @@ export default function ImagePage() {
             );
             saveLog(
                 buildLog({
+                    mode: "general",
                     prompt: text,
-                    promptTokens: snapshot.promptTokens,
-                    negativePrompt: snapshot.negativePrompt,
-                    negativePromptTokens: snapshot.negativePromptTokens,
+                    promptTranslation,
                     model,
                     config: { ...snapshot.config, count: String(generationCount) },
                     references: snapshot.references,
@@ -257,7 +269,6 @@ export default function ImagePage() {
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
         if (payload.kind === "text") {
             setPrompt(payload.content);
-            setPromptTokens([]);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
             setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
@@ -269,9 +280,7 @@ export default function ImagePage() {
 
     const createSession = () => {
         setPrompt("");
-        setPromptTokens([]);
-        setNegativePrompt("");
-        setNegativePromptTokens([]);
+        setPromptTranslation("");
         setReferences([]);
         setResults([]);
         setElapsedMs(0);
@@ -300,16 +309,18 @@ export default function ImagePage() {
     const previewGenerationLog = async (log: GenerationLog) => {
         setPreviewLog(log);
         setLogsOpen(false);
+        setActiveTab(log.mode);
         setPrompt(log.prompt);
-        setPromptTokens(log.promptTokens || []);
-        setNegativePrompt(log.negativePrompt || "");
-        setNegativePromptTokens(log.negativePromptTokens || []);
+        setPromptTranslation(log.promptTranslation || "");
         setReferences(log.references || []);
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
-        NOVELAI_CONFIG_KEYS.forEach((key) => updateConfig(key, log.config[key]));
+        // 只有 NovelAI 标签页的记录才回写 NovelAI 参数。
+        // 通用生图记录里的 NovelAI 字段是归一化后的快照（全是默认值），
+        // 回写会把用户在别处调好的 NovelAI 配置刷掉。
+        if (log.mode === "novelai") NOVELAI_CONFIG_KEYS.forEach((key) => updateConfig(key, log.config[key]));
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     };
 
@@ -324,14 +335,16 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, promptTokens: [...promptTokens], negativePrompt: negativePrompt.trim(), negativePromptTokens: [...negativePromptTokens], config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        // 通用生图必须显式关掉 NovelAI：全局 config 里可能残留 novelAIEnabled=true，
+        // 那会让 requestGeneration/requestEdit 走 NovelAI 分支（尺寸规则与参数体完全不同）。
+        return { text, config: { ...effectiveConfig, model, count: "1", novelAIEnabled: false }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; promptTokens: PromptBlockToken[]; negativePrompt: string; negativePromptTokens: PromptBlockToken[]; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            const requestOptions = snapshot.negativePrompt ? { negativePrompt: snapshot.negativePrompt } : undefined;
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
+            // 通用生图不发负面提示词：译文区只是查看用，负面提示词属于 NovelAI 标签页。
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
@@ -383,106 +396,39 @@ export default function ImagePage() {
                                     </Button>
                                 </div>
                             </div>
+                            <Segmented
+                                className="mt-3 w-full [&_.ant-segmented-group]:!flex [&_.ant-segmented-item]:!flex-1"
+                                value={activeTab}
+                                options={WORKBENCH_TABS.map((item) => ({ value: item.value, label: item.label }))}
+                                onChange={(value) => setActiveTab(value as GenerationMode)}
+                            />
                         </div>
 
-                        <div className="mt-6 space-y-5">
-                            <div>
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">提示词</span>
-                                    <div className="flex gap-2">
-                                        <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
-                                            查看提示词库
-                                        </Button>
-                                        <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
-                                            查看我的素材
-                                        </Button>
-                                    </div>
-                                </div>
-                                <PromptBlockEditor
-                                    value={prompt}
-                                    onChange={setPrompt}
-                                    tokens={promptTokens.length ? promptTokens : undefined}
-                                    onTokensChange={setPromptTokens}
-                                    rows={7}
-                                    className="rounded-md border-stone-300 bg-transparent transition focus-within:border-blue-500 dark:border-stone-700"
-                                    placeholder="描述画面主体、风格、构图、光线和用途"
-                                />
-                            </div>
-
-                            <div>
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">负面提示词（NAI）</span>
-                                    <span className="text-xs text-stone-500 dark:text-stone-400">留空使用默认</span>
-                                </div>
-                                <PromptBlockEditor
-                                    value={negativePrompt}
-                                    onChange={setNegativePrompt}
-                                    tokens={negativePromptTokens.length ? negativePromptTokens : undefined}
-                                    onTokensChange={setNegativePromptTokens}
-                                    rows={3}
-                                    className="rounded-md border-stone-300 bg-transparent transition focus-within:border-blue-500 dark:border-stone-700"
-                                    placeholder="例如：lowres, bad anatomy, blurry"
-                                />
-                            </div>
-
-                            <div className="min-w-0">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">参考图</span>
-                                    <div className="flex gap-2">
-                                        <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
-                                            剪切板
-                                        </Button>
-                                        <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                                            上传
-                                        </Button>
-                                    </div>
-                                </div>
-                                <div
-                                    className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700"
-                                    onWheel={(event) => {
-                                        if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return;
-                                        event.preventDefault();
-                                        event.currentTarget.scrollLeft += event.deltaY;
-                                    }}
-                                >
-                                    {references.map((item, index) => (
-                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
-                                            <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{imageReferenceLabel(index)}</span>
-                                            <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
-                                            <button
-                                                type="button"
-                                                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
-                                                onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))}
-                                                aria-label="移除参考图"
-                                            >
-                                                <Trash2 className="size-3.5" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图</div> : null}
-                                </div>
-                            </div>
-
-                            <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
-                                <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {effectiveConfig.size} · {effectiveConfig.quality}
-                                </span>
-                                <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                    调整
-                                </Button>
-                            </div>
-
-                            <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
-                            </div>
-                        </div>
-
-                        <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                开始生成
-                            </Button>
-                        </div>
+                        {activeTab === "general" ? (
+                            <GeneralGenerationPanel
+                                prompt={prompt}
+                                onPromptChange={setPrompt}
+                                promptTranslation={promptTranslation}
+                                onPromptTranslationChange={setPromptTranslation}
+                                onSwapTranslation={swapPromptTranslation}
+                                references={references}
+                                onReferencesChange={(updater) => setReferences(updater)}
+                                onPasteReferences={() => void addReferencesFromClipboard()}
+                                onUploadReferences={() => fileInputRef.current?.click()}
+                                config={effectiveConfig}
+                                model={model}
+                                updateConfig={updateConfig}
+                                openConfigDialog={openConfigDialog}
+                                onOpenPromptLibrary={() => setPromptDialogOpen(true)}
+                                onOpenAssetPicker={() => setAssetPickerOpen(true)}
+                                onOpenSettingsDrawer={() => setSettingsOpen(true)}
+                                running={running}
+                                canGenerate={canGenerate}
+                                onGenerate={() => void generate()}
+                            />
+                        ) : (
+                            <NovelAIGenerationPlaceholder />
+                        )}
                     </div>
 
                     <div className="thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5">
@@ -537,38 +483,15 @@ export default function ImagePage() {
             </Drawer>
             <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} showNovelAI={false} />
                 </div>
             </Drawer>
-            <PromptSelectDialog
-                open={promptDialogOpen}
-                onOpenChange={setPromptDialogOpen}
-                onSelect={(value) => {
-                    setPrompt(value);
-                    setPromptTokens([]);
-                }}
-            />
+            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={(value) => setPrompt(value)} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
             </Modal>
         </div>
-    );
-}
-
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
-
-    return (
-        <>
-            <label className="col-span-2 block min-w-0 sm:col-span-1">
-                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
-            </label>
-            <div className="col-span-2">
-                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
-            </div>
-        </>
     );
 }
 
@@ -796,8 +719,12 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     return {
         id: log.id || nanoid(),
         createdAt: log.createdAt || Date.now(),
+        // 老记录没有 mode。它们都产生于「通用生图 + 可选 NAI 参数」的旧工作台，
+        // 统一按 general 处理，避免恢复时把 NovelAI 参数刷回全局配置。
+        mode: log.mode === "novelai" ? "novelai" : "general",
         title: log.title || log.model || "未命名",
         prompt: log.prompt || log.title || "",
+        promptTranslation: log.promptTranslation || "",
         promptTokens: log.promptTokens,
         negativePrompt: log.negativePrompt || "",
         negativePromptTokens: log.negativePromptTokens,
@@ -837,29 +764,10 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     };
 }
 
-function moveListItem<T>(items: T[], index: number, offset: number) {
-    const targetIndex = index + offset;
-    if (targetIndex < 0 || targetIndex >= items.length) return items;
-    const next = [...items];
-    [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
-    return next;
-}
-
-function ReferenceOrderButtons({ index, total, onMove }: { index: number; total: number; onMove: (offset: number) => void }) {
-    if (total <= 1) return null;
-    return (
-        <div className="absolute inset-x-1 bottom-1 flex justify-between">
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
-        </div>
-    );
-}
-
 function buildLog({
+    mode,
     prompt,
-    promptTokens,
-    negativePrompt,
-    negativePromptTokens,
+    promptTranslation,
     model,
     config,
     references,
@@ -869,10 +777,9 @@ function buildLog({
     status,
     images,
 }: {
+    mode: GenerationMode;
     prompt: string;
-    promptTokens?: PromptBlockToken[];
-    negativePrompt?: string;
-    negativePromptTokens?: PromptBlockToken[];
+    promptTranslation?: string;
     model: string;
     config: GenerationLogConfig;
     references: ReferenceImage[];
@@ -893,11 +800,10 @@ function buildLog({
     return {
         id: nanoid(),
         createdAt: Date.now(),
+        mode,
         title: prompt.slice(0, 12) || "未命名",
         prompt,
-        promptTokens,
-        negativePrompt: negativePrompt?.trim() || "",
-        negativePromptTokens,
+        promptTranslation: promptTranslation?.trim() || "",
         time: new Date().toLocaleString("zh-CN", { hour12: false }),
         model,
         config: logConfig,
