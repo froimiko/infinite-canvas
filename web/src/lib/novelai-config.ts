@@ -60,8 +60,11 @@ export function normalizeNovelAISettings(config: Partial<NovelAISettings> & { mo
         novelAIDivideRoles: Boolean(merged.novelAIDivideRoles),
         novelAIUseAutoPositioning: Boolean(merged.novelAIUseAutoPositioning),
         novelAICharacterPrompts: normalizeNovelAICharacterPrompts(merged.novelAICharacterPrompts),
-        novelAIQualityToggle: merged.novelAIQualityToggle !== false,
-        novelAIAddOriginalImage: merged.novelAIAddOriginalImage !== false,
+        // 这两个开关默认关闭，所以必须用 === true 判定。
+        // 写成 !== false 会让 undefined 变成 true，等于默认永远开着，
+        // 与 DEFAULT_NOVELAI_SETTINGS 对不上（历史上就是这么写错的）。
+        novelAIQualityToggle: merged.novelAIQualityToggle === true,
+        novelAIAddOriginalImage: merged.novelAIAddOriginalImage === true,
     };
 }
 

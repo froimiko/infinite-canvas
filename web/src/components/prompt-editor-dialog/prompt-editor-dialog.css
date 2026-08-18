@@ -378,3 +378,57 @@
     bottom: -3px;
     cursor: nwse-resize;
 }
+
+/*
+ * 内联模式：嵌进页面而不是浮在最上层。
+ * 与弹窗模式共用 .pe-dialog 的内部结构，这里只覆盖定位/尺寸/阴影。
+ */
+.pe-dialog--inline {
+    position: static;
+    z-index: auto;
+    min-width: 0;
+    width: 100%;
+    height: auto;
+    padding: 12px 0;
+    box-shadow: none;
+}
+
+.pe-dialog--inline .pe-dialog__editor {
+    flex: 0 0 auto;
+    height: 168px;
+    margin: 0;
+}
+
+.pe-dialog--inline .pe-dialog__actions {
+    padding: 0;
+}
+
+.pe-dialog--inline .pe-tokens {
+    flex: 0 0 auto;
+    min-height: 96px;
+    max-height: 168px;
+    margin: 0;
+}
+
+/* 「tag候选」勾选框，样式与 .pe-button 同高，视觉上并排 */
+.pe-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    background: #2a2a2e;
+    color: #e4e4e7;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.pe-checkbox input {
+    width: 13px;
+    height: 13px;
+    accent-color: #4f46e5;
+    cursor: pointer;
+}

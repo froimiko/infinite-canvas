@@ -535,31 +535,37 @@ func TestResolveNovelAIModelWordBoundary(t *testing.T) {
 	}
 }
 
+// 两个开关的默认值都是 false，所以这里验证「显式打开能透传」——
+// 只测显式 false 的话与默认值同值，测不出 normalizeBool 是否真的读了入参。
 func TestConvertToNovelAIRequestQualityTogglePasses(t *testing.T) {
-	toggleFalse := false
-	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
-		Model:          "nai-diffusion-3",
-		Prompt:         "test",
-		Size:           "1024x1024",
-		NovelAIEnabled: true,
-		QualityToggle:  &toggleFalse,
-	})
-	if req.Parameters.QualityToggle {
-		t.Fatalf("qualityToggle = true, want false")
+	for _, want := range []bool{true, false} {
+		toggle := want
+		req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+			Model:          "nai-diffusion-3",
+			Prompt:         "test",
+			Size:           "1024x1024",
+			NovelAIEnabled: true,
+			QualityToggle:  &toggle,
+		})
+		if req.Parameters.QualityToggle != want {
+			t.Fatalf("qualityToggle = %v, want %v", req.Parameters.QualityToggle, want)
+		}
 	}
 }
 
 func TestConvertToNovelAIRequestAddOriginalImagePasses(t *testing.T) {
-	off := false
-	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
-		Model:           "nai-diffusion-3",
-		Prompt:          "test",
-		Size:            "1024x1024",
-		NovelAIEnabled:  true,
-		AddOriginalImage: &off,
-	})
-	if req.Parameters.AddOriginalImage {
-		t.Fatalf("addOriginalImage = true, want false")
+	for _, want := range []bool{true, false} {
+		flag := want
+		req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+			Model:            "nai-diffusion-3",
+			Prompt:           "test",
+			Size:             "1024x1024",
+			NovelAIEnabled:   true,
+			AddOriginalImage: &flag,
+		})
+		if req.Parameters.AddOriginalImage != want {
+			t.Fatalf("addOriginalImage = %v, want %v", req.Parameters.AddOriginalImage, want)
+		}
 	}
 }
 

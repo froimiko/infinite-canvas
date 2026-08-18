@@ -2065,8 +2065,11 @@ function InfiniteCanvasPage() {
                     const requestPrompt = isNovelAINode ? applyNovelAIQualityTags(effectivePrompt, presetModel, normalizeNovelAIQualityPreset(sourceNode?.metadata?.naQualityPreset)) : effectivePrompt;
                     // NovelAI 节点的 qualityToggle / addOriginalImage / ucPreset 需要随请求发送给后端。
                     // ucPreset 必须跟随「负面质量词」下拉，否则上游仍按默认 Heavy 预设叠加一份负面词。
-                    const naQualityToggle = isNovelAINode ? normalizeNovelAIQualityPreset(sourceNode?.metadata?.naQualityPreset) !== "none" : undefined;
-                    const naAddOriginalImage = isNovelAINode ? sourceNode?.metadata?.naAddOriginalImage : undefined;
+                    // naQualityToggle 必须读开关本身，不能由质量词预设推导。
+                    // 历史写法是 `预设 !== "none"`，等于把面板上的「质量词增强」开关彻底忽略。
+                    // 语义也不同：预设决定前端注入哪套质量词；这个开关决定要不要再让上游追加一份。
+                    const naQualityToggle = isNovelAINode ? sourceNode?.metadata?.naQualityToggle === true : undefined;
+                    const naAddOriginalImage = isNovelAINode ? sourceNode?.metadata?.naAddOriginalImage === true : undefined;
                     const naUcPresetName = isNovelAINode ? novelAIUcPresetApiName(normalizeNovelAIUcPreset(sourceNode?.metadata?.naUcPreset)) : undefined;
                     const novelAIGenerationConfig = isNovelAINode
                         ? {

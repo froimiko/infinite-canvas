@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Eraser, Trash2, X } from "lucide-react";
 
@@ -57,12 +57,28 @@ type PromptEditorDialogProps = {
     preset?: PromptEditorPreset;
     onSubmit: (value: string, tokens: PromptBlockToken[]) => void;
     onClose: () => void;
+    /**
+     * 内联模式：不 portal、不 fixed、无标题栏/底部按钮/缩放角，直接嵌进页面。
+     *
+     * 与弹窗模式的关键差异：
+     *  - 弹窗靠「应用」按钮一次性 onSubmit；内联没有应用按钮，靠 onChange 实时上报。
+     *  - 内联下 target 只作为初始值读一次（见 initializedRef），绝不随外部变化重置，
+     *    否则父组件把 onChange 的值回灌进 target 就会造成光标跳、token 抖动。
+     *    需要切换字段（正面/负面）时，请在父组件用 key 强制 remount。
+     */
+    inline?: boolean;
+    /** 内联模式下的实时上报。弹窗模式不使用。 */
+    onChange?: (value: string, tokens: PromptBlockToken[]) => void;
+    /** 是否启用 Tag 候选下拉。false 时不发搜索请求也不渲染候选层。 */
+    suggestionsEnabled?: boolean;
+    /** 追加到操作条尾部的自定义控件（如「tag候选」勾选框）。 */
+    actionsExtra?: ReactNode;
 };
 
 type DragState = { x: number; y: number };
 type ResizeState = { corner: ResizeCorner; startX: number; startY: number; startWidth: number; startHeight: number; startLeft: number; startTop: number };
 
-export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器", target, preset, onSubmit, onClose }: PromptEditorDialogProps) {
+export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器", target, preset, onSubmit, onClose, inline = false, onChange, suggestionsEnabled = true, actionsExtra }: PromptEditorDialogProps) {
     const [tokens, setTokens] = useState<PromptBlockToken[]>([]);
     const [draft, setDraft] = useState("");
     const [suggestions, setSuggestions] = useState<TagSearchResult[]>([]);
@@ -89,27 +105,51 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
     const currentWordRef = useRef<CurrentWord>({ query: "", replaceStart: 0, replaceEnd: 0 });
     const searchIdRef = useRef(0);
     const editTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // 内联模式的初始化守卫：只在首次挂载时读 target，之后一律不再重置内部状态。
+    const initializedRef = useRef(false);
+    // 上报门闩必须是 state 而不是 ref：初始化 effect 里的 setTokens 要到下一次渲染才生效，
+    // 若用 ref 判断，上报 effect 会在首帧带着空 tokens 先跑一次，把父组件的值冲成空串。
+    const [inlineReady, setInlineReady] = useState(false);
+    // onChange 放进 ref，避免父组件每次渲染换新函数时触发初始化 effect。
+    const onChangeRef = useRef(onChange);
+    onChangeRef.current = onChange;
 
     const tokenCount = useMemo(() => tokens.filter((token) => !token.disabled && token.kind !== "newline").length, [tokens]);
 
     useEffect(() => {
         if (!open) return;
+        // 内联模式下 target 只是初始值：外部值变化不能重置内部状态，
+        // 否则父组件回灌 onChange 的结果会让光标跳到末尾、token 闪烁。
+        if (inline && initializedRef.current) return;
+        initializedRef.current = true;
         const initial = target.tokens?.length ? normalizePromptBlockTokens(target.tokens) : normalizePromptBlockTokens(parsePromptToTokens(target.value || ""));
         setTokens(initial);
         setDraft(serializeTokensToPrompt(initial));
         setShowSuggestions(false);
         setEditingTokenId(null);
+        if (inline) {
+            setInlineReady(true);
+            return;
+        }
         const width = Math.min(960, window.innerWidth - 48);
         const height = Math.min(560, window.innerHeight - 48);
         setSize({ width, height });
         setPosition({ x: Math.max(24, (window.innerWidth - width) / 2), y: Math.max(24, (window.innerHeight - height) / 2) });
-    }, [open, target.tokens, target.value]);
+    }, [inline, open, target.tokens, target.value]);
 
     useEffect(() => {
         return () => {
             if (editTimerRef.current) clearTimeout(editTimerRef.current);
         };
     }, []);
+
+    // 内联模式：token 任何变化都实时上报。
+    // 用 effect 统一上报而不是在每个修改点手动调 onChange —— 打字、插入候选、拖拽排序、
+    // 双击禁用、清空、翻译回填全都会走 tokens，逐点调用必然漏掉某条路径。
+    useEffect(() => {
+        if (!inline || !inlineReady) return;
+        onChangeRef.current?.(serializeTokensToPrompt(tokens), tokens);
+    }, [inline, inlineReady, tokens]);
 
     const syncCaretMenu = useCallback(() => {
         const textarea = textareaRef.current;
@@ -120,6 +160,10 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
 
     useEffect(() => {
         if (!open) return;
+        if (!suggestionsEnabled) {
+            setShowSuggestions(false);
+            return;
+        }
         const keyword = currentWordRef.current.query.trim();
         if (!keyword) {
             setShowSuggestions(false);
@@ -138,7 +182,7 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                 .catch(() => setShowSuggestions(false));
         }, SEARCH_DEBOUNCE_MS);
         return () => window.clearTimeout(timeout);
-    }, [draft, open]);
+    }, [draft, open, suggestionsEnabled]);
 
     useEffect(() => {
         if (!dragging) return;
@@ -368,22 +412,24 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
         setResizing(true);
     };
 
-    return createPortal(
+    const dialog = (
         <div
-            className="pe-dialog"
-            style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
+            className={inline ? "pe-dialog pe-dialog--inline" : "pe-dialog"}
+            style={inline ? undefined : { left: position.x, top: position.y, width: size.width, height: size.height }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
-            <div className="pe-dialog__header" onPointerDown={startWindowDrag}>
-                <span className="pe-dialog__title">
-                    {title} · {target.title}
-                </span>
-                <button type="button" className="pe-dialog__close" onClick={onClose} aria-label="关闭">
-                    <X className="size-4" />
-                </button>
-            </div>
+            {inline ? null : (
+                <div className="pe-dialog__header" onPointerDown={startWindowDrag}>
+                    <span className="pe-dialog__title">
+                        {title} · {target.title}
+                    </span>
+                    <button type="button" className="pe-dialog__close" onClick={onClose} aria-label="关闭">
+                        <X className="size-4" />
+                    </button>
+                </div>
+            )}
 
             <div ref={wrapRef} className="pe-dialog__editor">
                 <textarea
@@ -437,6 +483,7 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                 <button type="button" className="pe-button" disabled={!authToken || isTranslatingAll} title={authToken ? "使用后台配置的网络翻译" : "请先登录"} onClick={() => void translateAllTokens()}>
                     <TranslateIcon size={14} /> {isTranslatingAll ? "翻译中…" : "一键翻译Tag"}
                 </button>
+                {actionsExtra}
                 <span className="pe-dialog__hint">单击 Tag 文字编辑 · 双击屏蔽 · 拖动排序</span>
                 {translateError ? <span className="pe-dialog__error">{translateError}</span> : null}
             </div>
@@ -504,27 +551,33 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                 )}
             </div>
 
-            <div className="pe-dialog__footer">
-                <button type="button" className="pe-button" onClick={onClose}>
-                    取消
-                </button>
-                <button
-                    type="button"
-                    className="pe-button is-primary"
-                    onClick={() => {
-                        const normalized = normalizePromptBlockTokens(parsePromptToTokens(draft, tokens));
-                        onSubmit(serializeTokensToPrompt(normalized), normalized);
-                        onClose();
-                    }}
-                >
-                    应用
-                </button>
-            </div>
+            {inline ? null : (
+                <div className="pe-dialog__footer">
+                    <button type="button" className="pe-button" onClick={onClose}>
+                        取消
+                    </button>
+                    <button
+                        type="button"
+                        className="pe-button is-primary"
+                        onClick={() => {
+                            const normalized = normalizePromptBlockTokens(parsePromptToTokens(draft, tokens));
+                            onSubmit(serializeTokensToPrompt(normalized), normalized);
+                            onClose();
+                        }}
+                    >
+                        应用
+                    </button>
+                </div>
+            )}
 
-            {RESIZE_CORNERS.map((corner) => (
-                <div key={corner} className={`pe-resize pe-resize--${corner}`} onPointerDown={(event) => startResize(corner, event)} />
-            ))}
-        </div>,
-        document.body,
+            {inline
+                ? null
+                : RESIZE_CORNERS.map((corner) => (
+                      <div key={corner} className={`pe-resize pe-resize--${corner}`} onPointerDown={(event) => startResize(corner, event)} />
+                  ))}
+        </div>
     );
+
+    // 内联模式直接就地渲染；弹窗模式仍旧 portal 到 body（画布节点依赖这个行为）。
+    return inline ? dialog : createPortal(dialog, document.body);
 }

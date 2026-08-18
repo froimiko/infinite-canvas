@@ -278,3 +278,16 @@
 .na-count-input input::-webkit-outer-spin-button {
     appearance: none;
 }
+
+/*
+ * 内联变体：生图工作台里平铺展开，不再是浮层。
+ * 只覆盖外框相关属性，内部所有 .na-field / .na-slider 等样式完全共用。
+ */
+.na-panel--inline {
+    width: 100%;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}

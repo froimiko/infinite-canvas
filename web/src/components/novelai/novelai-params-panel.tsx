@@ -18,6 +18,11 @@ type NovelAIParamsPanelProps = {
     metadata: CanvasNodeMetadata;
     theme: CanvasTheme;
     onChange: (patch: Partial<CanvasNodeMetadata>) => void;
+    /**
+     * popover：画布节点的浮层（固定 300px 宽 + 阴影）。
+     * inline：生图工作台内嵌平铺（100% 宽、无阴影、无边框）。
+     */
+    variant?: "popover" | "inline";
 };
 
 const SAMPLER_LABELS: Record<string, string> = {
@@ -36,7 +41,7 @@ const NOISE_LABELS: Record<string, string> = {
     polyexponential: "Polyexponential",
 };
 
-export function NovelAIParamsPanel({ metadata, theme, onChange }: NovelAIParamsPanelProps) {
+export function NovelAIParamsPanel({ metadata, theme, onChange, variant = "popover" }: NovelAIParamsPanelProps) {
     const { width, height } = parseNovelAISize(metadata.size);
     const steps = clamp(Number(metadata.novelAISteps ?? 28), 1, 50);
     const cfgScale = clamp(Number(metadata.novelAICfgScale ?? 5), 1, 25);
@@ -46,8 +51,9 @@ export function NovelAIParamsPanel({ metadata, theme, onChange }: NovelAIParamsP
     const count = Math.max(1, Math.min(MAX_COUNT, Math.floor(Math.abs(Number(metadata.count)) || 1)));
     const modelId = resolveNovelAIModelId(metadata.novelAIModel || metadata.model);
     const isV4 = modelId.startsWith("nai-diffusion-4");
-    const qualityToggle = metadata.naQualityToggle !== false;
-    const addOriginalImage = metadata.naAddOriginalImage !== false;
+    // 默认关闭，所以用 === true 判定（!== false 会让 undefined 变成开启）。
+    const qualityToggle = metadata.naQualityToggle === true;
+    const addOriginalImage = metadata.naAddOriginalImage === true;
 
     const updateDimension = (key: "width" | "height", next: number) => {
         const safe = Math.max(64, Math.round(next || 0));
@@ -56,7 +62,7 @@ export function NovelAIParamsPanel({ metadata, theme, onChange }: NovelAIParamsP
 
     return (
         <div
-            className="na-panel"
+            className={variant === "inline" ? "na-panel na-panel--inline" : "na-panel"}
             style={
                 {
                     "--na-panel-bg": theme.toolbar.panel,

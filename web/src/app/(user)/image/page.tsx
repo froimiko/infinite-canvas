@@ -17,9 +17,11 @@ import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/ima
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { NovelAISettings, ReferenceImage } from "@/types/image";
 import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
+import { applyNovelAIQualityTags, applyNovelAIUcPreset, normalizeNovelAIQualityPreset, normalizeNovelAIUcPreset, novelAIUcPresetApiName, resolveNovelAIModelId } from "@/components/novelai/novelai-presets";
+import { useNovelAIWorkbenchStore } from "@/stores/use-novelai-workbench-store";
 import { GeneralGenerationPanel } from "./components/general-generation-panel";
 import { GenerationSettings } from "./components/generation-settings";
-import { NovelAIGenerationPlaceholder } from "./components/novelai-generation-placeholder";
+import { NovelAIGenerationPanel } from "./components/novelai-generation-panel";
 
 type GeneratedImage = {
     id: string;
@@ -73,25 +75,6 @@ type GenerationLog = {
 
 type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count"> & NovelAISettings;
 
-const NOVELAI_CONFIG_KEYS = [
-    "novelAIEnabled",
-    "novelAIModel",
-    "novelAISampler",
-    "novelAISteps",
-    "novelAICfgScale",
-    "novelAISeed",
-    "novelAIUcPreset",
-    "novelAICfgRescale",
-    "novelAINoiseSchedule",
-    "novelAISm",
-    "novelAISmDyn",
-    "novelAIDynamicThresholding",
-    "novelAIVarietyPlus",
-    "novelAIAqtPreset",
-    "novelAIDivideRoles",
-    "novelAIUseAutoPositioning",
-    "novelAICharacterPrompts",
-] as const satisfies ReadonlyArray<keyof NovelAISettings>;
 
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
@@ -111,6 +94,8 @@ export default function ImagePage() {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [activeTab, setActiveTab] = useState<GenerationMode>("general");
+    const [novelAIField, setNovelAIField] = useState<"positive" | "negative">("positive");
+    const novelAI = useNovelAIWorkbenchStore();
     const [prompt, setPrompt] = useState("");
     const [promptTranslation, setPromptTranslation] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
@@ -127,9 +112,11 @@ export default function ImagePage() {
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-    const model = effectiveConfig.imageModel || effectiveConfig.model;
-    const canGenerate = Boolean(prompt.trim());
-    const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
+    const isNovelAITab = activeTab === "novelai";
+    // NovelAI 标签页用自己的模型与张数（store），通用页仍走全局 config。
+    const model = isNovelAITab ? novelAI.model || effectiveConfig.imageModel || effectiveConfig.model : effectiveConfig.imageModel || effectiveConfig.model;
+    const canGenerate = Boolean((isNovelAITab ? novelAI.positivePrompt : prompt).trim());
+    const generationCount = isNovelAITab ? Math.max(1, Math.min(15, Number(novelAI.count) || 1)) : Math.max(1, Math.min(10, Number(config.count) || 1));
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -180,7 +167,7 @@ export default function ImagePage() {
     };
 
     const generate = async () => {
-        const text = prompt.trim();
+        const text = (isNovelAITab ? novelAI.positivePrompt : prompt).trim();
         if (!text) {
             message.error("请输入生图提示词");
             return;
@@ -223,9 +210,10 @@ export default function ImagePage() {
             );
             saveLog(
                 buildLog({
-                    mode: "general",
-                    prompt: text,
-                    promptTranslation,
+                    mode: activeTab,
+                    prompt: snapshot.text,
+                    promptTranslation: isNovelAITab ? "" : promptTranslation,
+                    negativePrompt: snapshot.negativePrompt,
                     model,
                     config: { ...snapshot.config, count: String(generationCount) },
                     references: snapshot.references,
@@ -281,6 +269,7 @@ export default function ImagePage() {
     const createSession = () => {
         setPrompt("");
         setPromptTranslation("");
+        novelAI.reset();
         setReferences([]);
         setResults([]);
         setElapsedMs(0);
@@ -310,23 +299,45 @@ export default function ImagePage() {
         setPreviewLog(log);
         setLogsOpen(false);
         setActiveTab(log.mode);
-        setPrompt(log.prompt);
-        setPromptTranslation(log.promptTranslation || "");
         setReferences(log.references || []);
-        if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
-        if (log.config.quality) updateConfig("quality", log.config.quality);
-        if (log.config.size) updateConfig("size", log.config.size);
-        if (log.config.count) updateConfig("count", log.config.count);
-        // 只有 NovelAI 标签页的记录才回写 NovelAI 参数。
-        // 通用生图记录里的 NovelAI 字段是归一化后的快照（全是默认值），
-        // 回写会把用户在别处调好的 NovelAI 配置刷掉。
-        if (log.mode === "novelai") NOVELAI_CONFIG_KEYS.forEach((key) => updateConfig(key, log.config[key]));
+        // 通用记录才回写全局 config：NovelAI 的模型/尺寸/张数属于 NAI 标签页私有状态，
+        // 写进全局会把通用页的尺寸洗成 832x1216 这类 NAI 专用值。
+        if (log.mode === "general") {
+            setPrompt(log.prompt);
+            setPromptTranslation(log.promptTranslation || "");
+            if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
+            if (log.config.quality) updateConfig("quality", log.config.quality);
+            if (log.config.size) updateConfig("size", log.config.size);
+            if (log.config.count) updateConfig("count", log.config.count);
+        }
+        // NovelAI 记录恢复到 NAI 标签页自己的 store。
+        if (log.mode === "novelai") {
+            novelAI.patch({
+                model: log.config.imageModel || log.model || "",
+                size: log.config.size || novelAI.size,
+                count: Math.max(1, Math.min(15, Number(log.config.count) || 1)),
+                novelAISampler: log.config.novelAISampler,
+                novelAISteps: log.config.novelAISteps,
+                novelAICfgScale: log.config.novelAICfgScale,
+                novelAICfgRescale: log.config.novelAICfgRescale,
+                novelAINoiseSchedule: log.config.novelAINoiseSchedule,
+                novelAISeed: log.config.novelAISeed,
+                novelAIVarietyPlus: log.config.novelAIVarietyPlus,
+                naQualityToggle: log.config.novelAIQualityToggle,
+                naAddOriginalImage: log.config.novelAIAddOriginalImage,
+                // 提示词里已经含注入好的质量词，直接回填即可；tokens 交给编辑器重新解析。
+                positivePrompt: log.prompt,
+                positiveTokens: [],
+                negativePrompt: log.negativePrompt || "",
+                negativeTokens: [],
+            });
+        }
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     };
 
     const buildRequestSnapshot = () => {
-        const text = prompt.trim();
-        if (!text) {
+        const rawPrompt = (isNovelAITab ? novelAI.positivePrompt : prompt).trim();
+        if (!rawPrompt) {
             message.error("请输入生图提示词");
             return null;
         }
@@ -335,16 +346,56 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
+        if (isNovelAITab) return buildNovelAISnapshot(rawPrompt);
         // 通用生图必须显式关掉 NovelAI：全局 config 里可能残留 novelAIEnabled=true，
         // 那会让 requestGeneration/requestEdit 走 NovelAI 分支（尺寸规则与参数体完全不同）。
-        return { text, config: { ...effectiveConfig, model, count: "1", novelAIEnabled: false }, references: [...references] };
+        return { text: rawPrompt, negativePrompt: "", config: { ...effectiveConfig, model, count: "1", novelAIEnabled: false }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+    /**
+     * NovelAI 快照。
+     *
+     * 与画布 NovelAI 节点走的是同一套注入规则（canvas-client-page 里那段），改一处必须同步另一处：
+     *  - 质量词按当前模型追加到正面提示词末尾（applyNovelAIQualityTags）
+     *  - 负面预设词拼在用户负面词前面（applyNovelAIUcPreset）
+     *  - uc_preset 必须跟随「负面质量词」下拉，否则上游还会按默认 Heavy 再叠一份负面词
+     *  - novelai_model 交给 buildNovelAIRequestParameters 里的 modelOptionName 剥渠道前缀
+     */
+    const buildNovelAISnapshot = (rawPrompt: string) => {
+        const presetModel = resolveNovelAIModelId(model);
+        const text = applyNovelAIQualityTags(rawPrompt, presetModel, normalizeNovelAIQualityPreset(novelAI.naQualityPreset));
+        const negativePrompt = applyNovelAIUcPreset(novelAI.negativePrompt, presetModel, normalizeNovelAIUcPreset(novelAI.naUcPreset));
+        const config: AiConfig = {
+            ...effectiveConfig,
+            model,
+            imageModel: model,
+            size: novelAI.size,
+            count: "1",
+            novelAIEnabled: true,
+            novelAIModel: model,
+            novelAISampler: novelAI.novelAISampler,
+            novelAISteps: novelAI.novelAISteps,
+            novelAICfgScale: novelAI.novelAICfgScale,
+            novelAICfgRescale: novelAI.novelAICfgRescale,
+            novelAINoiseSchedule: novelAI.novelAINoiseSchedule,
+            novelAISeed: novelAI.novelAISeed,
+            novelAIVarietyPlus: novelAI.novelAIVarietyPlus,
+            novelAIUcPreset: novelAIUcPresetApiName(normalizeNovelAIUcPreset(novelAI.naUcPreset)),
+            novelAIQualityToggle: novelAI.naQualityToggle,
+            novelAIAddOriginalImage: novelAI.naAddOriginalImage,
+        };
+        return { text, negativePrompt, config, references: [...references] };
+    };
+
+    const runGenerationSlot = async (index: number, snapshot: { text: string; negativePrompt: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            // 通用生图不发负面提示词：译文区只是查看用，负面提示词属于 NovelAI 标签页。
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            // 通用生图的 negativePrompt 恒为空串（译文区只作展示）；NovelAI 标签页才会带负面词。
+            // 有参考图就走 requestEdit（img2img），此时「附加原图」开关才真正生效。
+            const requestOptions = snapshot.negativePrompt ? { negativePrompt: snapshot.negativePrompt } : undefined;
+            const result = snapshot.references.length
+                ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions)
+                : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
@@ -427,7 +478,19 @@ export default function ImagePage() {
                                 onGenerate={() => void generate()}
                             />
                         ) : (
-                            <NovelAIGenerationPlaceholder />
+                            <NovelAIGenerationPanel
+                                activeField={novelAIField}
+                                onActiveFieldChange={setNovelAIField}
+                                references={references}
+                                onReferencesChange={(updater) => setReferences(updater)}
+                                onPasteReferences={() => void addReferencesFromClipboard()}
+                                onUploadReferences={() => fileInputRef.current?.click()}
+                                config={effectiveConfig}
+                                openConfigDialog={openConfigDialog}
+                                running={running}
+                                canGenerate={canGenerate}
+                                onGenerate={() => void generate()}
+                            />
                         )}
                     </div>
 
@@ -768,6 +831,7 @@ function buildLog({
     mode,
     prompt,
     promptTranslation,
+    negativePrompt,
     model,
     config,
     references,
@@ -780,6 +844,7 @@ function buildLog({
     mode: GenerationMode;
     prompt: string;
     promptTranslation?: string;
+    negativePrompt?: string;
     model: string;
     config: GenerationLogConfig;
     references: ReferenceImage[];
@@ -804,6 +869,7 @@ function buildLog({
         title: prompt.slice(0, 12) || "未命名",
         prompt,
         promptTranslation: promptTranslation?.trim() || "",
+        negativePrompt: negativePrompt?.trim() || "",
         time: new Date().toLocaleString("zh-CN", { hour12: false }),
         model,
         config: logConfig,

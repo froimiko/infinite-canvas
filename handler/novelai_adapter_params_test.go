@@ -259,8 +259,11 @@ func TestConvertToNovelAIRequestGoldenDefaults(t *testing.T) {
 	if req.Parameters.UCPreset != 0 {
 		t.Errorf("ucPreset = %d, want 0 (Heavy)", req.Parameters.UCPreset)
 	}
-	if !req.Parameters.QualityToggle {
-		t.Error("qualityToggle should default to true")
+	if req.Parameters.QualityToggle {
+		t.Error("qualityToggle should default to false: 质量词已由前端按模型注入，上游再加一遍会双份")
+	}
+	if req.Parameters.AddOriginalImage {
+		t.Error("add_original_image should default to false: 纯文生图不需要附加原图")
 	}
 
 	body, err := json.MarshalIndent(req, "", "  ")

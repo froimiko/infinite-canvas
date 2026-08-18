@@ -267,7 +267,7 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 
 			// V4/V4.5 特性参数
 			UCPreset:          ucPreset,
-			QualityToggle:     normalizeBool(openAI.QualityToggle, true),
+			QualityToggle:     normalizeBool(openAI.QualityToggle, false),
 			SkipCfgAboveSigma: skipCfgAboveSigma,
 			CfgRescale:        cfgRescale,
 
@@ -278,7 +278,7 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			DynamicThresholding:                dynamicThresholding,
 			ControlnetStrength:                 1.0,
 			Legacy:                             false,
-			AddOriginalImage:                   normalizeBool(openAI.AddOriginalImage, true),
+			AddOriginalImage:                   normalizeBool(openAI.AddOriginalImage, false),
 			DeliberateEulerAncestralBug:        false,
 			PreferBrownian:                     true,
 			AutoSmea:                           false,

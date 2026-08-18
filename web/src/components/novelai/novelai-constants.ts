@@ -39,6 +39,11 @@ export const DEFAULT_NOVELAI_SETTINGS: NovelAISettings = {
     novelAIDivideRoles: false,
     novelAIUseAutoPositioning: false,
     novelAICharacterPrompts: [],
-    novelAIQualityToggle: true,
-    novelAIAddOriginalImage: true,
+    // 质量词增强（quality_toggle）默认关闭：本项目已在前端按模型注入质量词
+    // （applyNovelAIQualityTags），再让上游自己追加一遍就是双份质量词。
+    // 需要交给上游注入时，在参数面板里手动打开。
+    novelAIQualityToggle: false,
+    // 附加原图（add_original_image）默认关闭：只有 img2img 才有意义，
+    // 纯文生图开着它没用，而画布/工作台大多是文生图。
+    novelAIAddOriginalImage: false,
 };
