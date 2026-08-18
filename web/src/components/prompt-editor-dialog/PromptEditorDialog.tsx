@@ -171,7 +171,9 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
         const textarea = textareaRef.current;
         const wrap = wrapRef.current;
         if (!textarea || !wrap) return;
-        setMenuStyle(measureCaretPosition(textarea, wrap));
+        // 传候选层实测高度，让定位函数能准确判断「下方放不下就翻到上方」。
+        // 首帧候选层还没挂载（offsetHeight 取不到），函数内部会退回估算值。
+        setMenuStyle(measureCaretPosition(textarea, wrap, suggestionsRef.current?.offsetHeight ?? 0));
     }, []);
 
     /**
@@ -196,6 +198,14 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
         currentWordRef.current = word;
         setSearchQuery(word.query);
     }, []);
+
+    // 候选层挂载后 / 结果条数变化后再校正一次位置。
+    // 首帧算 top 时候选层还没渲染，只能用估算高度；真实高度出来后（尤其是结果只有 1~2 条、
+    // 实际远低于 280px 上限时）必须重算，否则向上翻转的落点会偏高、留出大片空隙。
+    useEffect(() => {
+        if (!showSuggestions) return;
+        syncCaretMenu();
+    }, [showSuggestions, suggestions.length, syncCaretMenu]);
 
     useEffect(() => {
         if (!open) return;

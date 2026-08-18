@@ -87,6 +87,10 @@
     user-select: none;
 }
 
+/*
+ * 候选层。注意 max-height 由 JS 内联样式动态给出（measureCaretPosition 会按光标
+ * 上/下方的可用空间收紧），这里只留一个兜底上限，别再写死死值覆盖计算结果。
+ */
 .pe-suggestions {
     position: absolute;
     z-index: 20;
