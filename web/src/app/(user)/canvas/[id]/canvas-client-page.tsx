@@ -21,6 +21,7 @@ import { applyNovelAIQualityTags, applyNovelAIUcPreset, normalizeNovelAIQualityP
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useTextTranslation } from "@/hooks/use-text-translation";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { App, Button, Dropdown, Modal } from "antd";
@@ -242,6 +243,8 @@ function ConnectionCreateOption({ theme, icon, title, description, onClick }: { 
 
 function InfiniteCanvasPage() {
     const { message, modal } = App.useApp();
+    // 翻译逻辑与生图工作台译文区共用，见 useTextTranslation。
+    const { translate: translateText } = useTextTranslation();
     const params = useParams<{ id: string }>();
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -317,6 +320,8 @@ function InfiniteCanvasPage() {
     const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
     const [dialogNodeId, setDialogNodeId] = useState<string | null>(null);
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+    // 正在翻译的文本节点 id 集合（可能同时翻译多个节点）。
+    const [translatingNodeIds, setTranslatingNodeIds] = useState<Set<string>>(new Set());
     const [editRequestNonce, setEditRequestNonce] = useState(0);
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
@@ -1501,6 +1506,44 @@ function InfiniteCanvasPage() {
 
     const handleNodeContentChange = useCallback((nodeId: string, content: string) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, content } } : node)));
+    }, []);
+
+    /**
+     * 文本节点一键翻译。
+     *
+     * 译文写进 metadata.textTranslation，只用于节点内展示与「↑↓」互换 ——
+     * 生成链路 / @ 引用 / AI 助手快照 一律只读 metadata.content，不要把译文接进去。
+     */
+    const handleTranslateTextNode = useCallback(
+        async (node: CanvasNodeData) => {
+            const content = node.metadata?.content?.trim();
+            if (!content) {
+                message.warning("文本节点为空，无法翻译");
+                return;
+            }
+            setTranslatingNodeIds((prev) => new Set(prev).add(node.id));
+            try {
+                const translated = await translateText(content);
+                if (!translated) return;
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, textTranslation: translated } } : item)));
+            } finally {
+                setTranslatingNodeIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(node.id);
+                    return next;
+                });
+            }
+        },
+        [message, translateText],
+    );
+
+    /** 把文本节点的正文与译文互换。 */
+    const handleSwapTextTranslation = useCallback((node: CanvasNodeData) => {
+        setNodes((prev) =>
+            prev.map((item) =>
+                item.id === node.id ? { ...item, metadata: { ...item.metadata, content: item.metadata?.textTranslation || "", textTranslation: item.metadata?.content || "" } } : item,
+            ),
+        );
     }, []);
 
     const toggleBatchExpanded = useCallback((nodeId: string) => {
@@ -2840,6 +2883,9 @@ function InfiniteCanvasPage() {
                             onSetBatchPrimary={setBatchPrimary}
                             onRetry={(node) => void handleRetryNode(node)}
                             onGenerateImage={generateImageFromTextNode}
+                            onTranslateText={(node) => void handleTranslateTextNode(node)}
+                            onSwapTextTranslation={handleSwapTextTranslation}
+                            isTranslatingText={translatingNodeIds.has(node.id)}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
                             onContextMenu={(event, id) => {
                                 event.preventDefault();

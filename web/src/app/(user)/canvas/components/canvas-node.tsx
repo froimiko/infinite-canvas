@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
+import { ChevronRight, Image as ImageIcon, Languages, Music2, RefreshCw, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -45,6 +45,12 @@ type CanvasNodeProps = {
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
+    /** 文本节点：一键翻译。译文写进 metadata.textTranslation，只在节点内展示。 */
+    onTranslateText?: (node: CanvasNodeData) => void;
+    /** 文本节点：把正文与译文互换。 */
+    onSwapTextTranslation?: (node: CanvasNodeData) => void;
+    /** 文本节点：是否正在翻译（loading 态由父组件按 nodeId 维护）。 */
+    isTranslatingText?: boolean;
     onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
@@ -65,6 +71,9 @@ type NodeContentRendererProps = {
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
+    onTranslateText?: (node: CanvasNodeData) => void;
+    onSwapTextTranslation?: (node: CanvasNodeData) => void;
+    isTranslatingText?: boolean;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
 };
@@ -100,6 +109,9 @@ export const CanvasNode = React.memo(function CanvasNode({
     onSetBatchPrimary,
     onRetry,
     onGenerateImage,
+    onTranslateText,
+    onSwapTextTranslation,
+    isTranslatingText = false,
     onViewImage,
     onContextMenu,
 }: CanvasNodeProps) {
@@ -311,6 +323,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
                         onGenerateImage={onGenerateImage}
+                        onTranslateText={onTranslateText}
+                        onSwapTextTranslation={onSwapTextTranslation}
+                        isTranslatingText={isTranslatingText}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                     />
@@ -392,32 +407,52 @@ function UnknownNodeContent({ theme }: Pick<NodeContentRendererProps, "theme">) 
     );
 }
 
-function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onGenerateImage }: NodeContentRendererProps) {
+function TextContent({
+    node,
+    theme,
+    isEditingContent,
+    textareaRef,
+    mentionReferences,
+    onContentChange,
+    onStopEditing,
+    onGenerateImage,
+    onTranslateText,
+    onSwapTextTranslation,
+    isTranslatingText = false,
+}: NodeContentRendererProps) {
     const fontSize = node.metadata?.fontSize || 14;
     const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.65)}px`, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
+    const translation = node.metadata?.textTranslation || "";
+    // 译文区只在有译文或翻译中时占位：文本节点默认只有 240px 高，
+    // 空译文白占一半会把正文挤没。
+    const showTranslation = Boolean(translation) || isTranslatingText;
+    const canSwap = Boolean((node.metadata?.content || "").trim()) || Boolean(translation.trim());
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden pt-8">
-            <button
-                type="button"
-                className="absolute right-3 top-3 z-20 inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium opacity-85 backdrop-blur-md transition hover:scale-[1.02] hover:opacity-100"
-                style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onGenerateImage?.(node);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-                title="用文本生图"
-                aria-label="用文本生图"
-            >
-                <ImageIcon className="size-3.5" />
-                生图
-            </button>
+            <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
+                <TextNodeActionButton
+                    theme={theme}
+                    title={canSwap ? "原文与译文互换" : "没有可互换的内容"}
+                    ariaLabel="原文与译文互换"
+                    disabled={!canSwap}
+                    onClick={() => onSwapTextTranslation?.(node)}
+                >
+                    <SwapVerticalIcon />
+                </TextNodeActionButton>
+                <TextNodeActionButton theme={theme} title="一键翻译（译文只在本节点显示）" ariaLabel="一键翻译" disabled={isTranslatingText} onClick={() => onTranslateText?.(node)}>
+                    <Languages className="size-3.5" />
+                    {isTranslatingText ? "翻译中" : "一键翻译"}
+                </TextNodeActionButton>
+                <TextNodeActionButton theme={theme} title="用文本生图" ariaLabel="用文本生图" onClick={() => onGenerateImage?.(node)}>
+                    <ImageIcon className="size-3.5" />
+                    生图
+                </TextNodeActionButton>
+            </div>
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
-                    className="thin-scrollbar block h-full w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-4 m-0 font-mono outline-none select-text appearance-none"
+                    className="thin-scrollbar block min-h-0 flex-1 w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-4 m-0 font-mono outline-none select-text appearance-none"
                     style={textStyle}
                     value={node.metadata?.content || ""}
                     references={mentionReferences}
@@ -432,11 +467,73 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     onWheel={(event) => event.stopPropagation()}
                 />
             ) : (
-                <div className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono" style={textStyle} onWheel={(event) => event.stopPropagation()}>
+                <div className="thin-scrollbar block min-h-0 flex-1 w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono" style={textStyle} onWheel={(event) => event.stopPropagation()}>
                     {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>双击编辑文字</span>}
                 </div>
             )}
+
+            {showTranslation ? (
+                <div
+                    className="thin-scrollbar block max-h-[45%] shrink-0 select-text overflow-y-auto whitespace-pre-wrap break-words border-t px-4 pb-3 pt-2 font-mono"
+                    style={{ ...textStyle, borderColor: theme.node.stroke, color: theme.node.muted }}
+                    onWheel={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    title="译文仅在本节点显示，不会发送给模型或被 @ 引用"
+                >
+                    {isTranslatingText && !translation ? <span style={{ color: theme.node.placeholder }}>翻译中…</span> : translation}
+                </div>
+            ) : null}
         </div>
+    );
+}
+
+/** 文本节点右上角的操作按钮。样式跟随画布主题，统一拦截拖动相关事件。 */
+function TextNodeActionButton({
+    theme,
+    title,
+    ariaLabel,
+    disabled = false,
+    onClick,
+    children,
+}: {
+    theme: NodeContentRendererProps["theme"];
+    title: string;
+    ariaLabel: string;
+    disabled?: boolean;
+    onClick: () => void;
+    children: ReactNode;
+}) {
+    return (
+        <button
+            type="button"
+            className={`inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium backdrop-blur-md transition ${disabled ? "cursor-not-allowed opacity-45" : "opacity-85 hover:scale-[1.02] hover:opacity-100"}`}
+            style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
+            disabled={disabled}
+            onClick={(event) => {
+                event.stopPropagation();
+                if (!disabled) onClick();
+            }}
+            // 必须同时拦 mousedown 与 pointerdown：画布靠这两个事件启动节点拖动，
+            // 只拦 click 的话按下按钮就会把整个节点拖走。
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            title={title}
+            aria-label={ariaLabel}
+        >
+            {children}
+        </button>
+    );
+}
+
+/** ↑↓ 交换图标。与生图工作台译文区的图标保持一致。 */
+function SwapVerticalIcon({ size = 14 }: { size?: number }) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M8 20V4" />
+            <path d="M4 8l4-4 4 4" />
+            <path d="M16 4v16" />
+            <path d="M20 16l-4 4-4-4" />
+        </svg>
     );
 }
 

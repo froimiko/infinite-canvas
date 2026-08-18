@@ -28,6 +28,15 @@ export type CanvasImageGenerationType = "generation" | "edit";
 
 export type CanvasNodeMetadata = Partial<NovelAISettings> & {
     content?: string;
+    /**
+     * 文本节点的译文（一键翻译结果）。
+     *
+     * 只用于在节点里展示与「↑↓」和正文互换，**绝不参与任何对外传输**：
+     * 生成链路（buildNodeGenerationContext / sourceTextContent）、@ 资源引用
+     * （canvas-resource-references）、AI 助手画布快照 一律只读 content。
+     * 新增读取点前请先确认是否会把译文带出节点。
+     */
+    textTranslation?: string;
     composerContent?: string;
     prompt?: string;
     promptTokens?: PromptBlockToken[];

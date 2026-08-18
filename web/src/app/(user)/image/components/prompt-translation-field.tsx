@@ -1,11 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { App, Button, Tooltip } from "antd";
+import { Button, Tooltip } from "antd";
 
 import { TranslateIcon } from "@/components/prompt-editor-dialog/translate-icon";
-import { networkTranslatePromptText } from "@/services/api/prompt-tags";
-import { useUserStore } from "@/stores/use-user-store";
+import { useTextTranslation } from "@/hooks/use-text-translation";
 
 type PromptTranslationFieldProps = {
     /** 原文（提示词框内容），翻译按钮以它为输入。 */
@@ -29,31 +27,12 @@ type PromptTranslationFieldProps = {
  *     这个判断在后端 `applyPromptTranslationDirection` 里做，前端不传语言码。
  */
 export function PromptTranslationField({ promptText, value, onChange, onSwap, rows = 4, disabled = false }: PromptTranslationFieldProps) {
-    const { message } = App.useApp();
-    const authToken = useUserStore((state) => state.token);
-    const [translating, setTranslating] = useState(false);
-    // 请求序号：用户连点或改了原文时，丢弃过期响应，避免旧译文覆盖新译文。
-    const requestRef = useRef(0);
+    // 翻译请求逻辑与画布文本节点共用，见 useTextTranslation。
+    const { translate, translating, canTranslate } = useTextTranslation();
 
-    const translate = async () => {
-        const text = promptText.trim();
-        if (!text) {
-            message.warning("请先输入提示词");
-            return;
-        }
-        const requestId = requestRef.current + 1;
-        requestRef.current = requestId;
-        setTranslating(true);
-        try {
-            const translated = await networkTranslatePromptText(text, authToken || undefined, "auto");
-            if (requestRef.current !== requestId) return;
-            onChange(translated.trim());
-        } catch (error) {
-            if (requestRef.current !== requestId) return;
-            message.error(error instanceof Error ? error.message : "翻译失败");
-        } finally {
-            if (requestRef.current === requestId) setTranslating(false);
-        }
+    const runTranslate = async () => {
+        const translated = await translate(promptText);
+        if (translated) onChange(translated);
     };
 
     const swapDisabled = disabled || (!promptText.trim() && !value.trim());
@@ -66,7 +45,7 @@ export function PromptTranslationField({ promptText, value, onChange, onSwap, ro
                     <span className="truncate text-xs text-stone-500 dark:text-stone-400">仅供查看，不会发给模型</span>
                 </div>
                 <div className="flex shrink-0 gap-2">
-                    <Button size="small" icon={<TranslateIcon size={14} />} loading={translating} disabled={disabled || !authToken} title={authToken ? "使用后台配置的网络翻译" : "请先登录"} onClick={() => void translate()}>
+                    <Button size="small" icon={<TranslateIcon size={14} />} loading={translating} disabled={disabled || !canTranslate} title={canTranslate ? "使用后台配置的网络翻译" : "请先登录"} onClick={() => void runTranslate()}>
                         一键翻译
                     </Button>
                     <Tooltip title="与提示词互换原文/译文">
