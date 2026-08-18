@@ -5,6 +5,7 @@ import type { CSSProperties, ChangeEvent, DragEvent, KeyboardEvent, MouseEvent, 
 
 import { searchPromptTags, translatePromptTags } from "@/services/api/prompt-tags";
 import type { PromptTagSearchResult } from "@/services/api/prompt-tags";
+import { useDismissOnOutside } from "@/hooks/use-dismiss-on-outside";
 import type { PromptBlockEditorProps, PromptBlockMentionReference, PromptBlockToken } from "./prompt-block-types";
 import { createPromptBlockToken, normalizePromptBlockTokens, parsePromptToTokens, promptTagSuggestionToToken, serializeTokensToPrompt, tokenNeedsTranslation } from "./prompt-block-utils";
 import "./prompt-block-editor.css";
@@ -206,6 +207,14 @@ export function PromptBlockEditor({
     useEffect(() => {
         scrollSelectedItemIntoView(suggestionsRef, showSuggestions, selectedSuggestionIndex);
     }, [selectedSuggestionIndex, showSuggestions]);
+
+    const dismissMenus = useCallback(() => {
+        setShowSuggestions(false);
+        setShowMentions(false);
+    }, []);
+
+    // 点击编辑器外部（含页面任意空白处）就收起候选/@提及浮层。
+    useDismissOnOutside({ enabled: showSuggestions || showMentions, refs: [textareaWrapRef, suggestionsRef, mentionsRef], onDismiss: dismissMenus });
 
     const replaceCurrentWord = useCallback(
         (text: string, preferredToken: PromptBlockToken, separator = ", ") => {

@@ -9,6 +9,7 @@ import { createPromptBlockToken, normalizePromptBlockTokens, parsePromptToTokens
 import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
 import { searchTags, type TagSearchResult } from "@/services/tag-service";
 import { networkTranslatePromptText } from "@/services/api/prompt-tags";
+import { useDismissOnOutside } from "@/hooks/use-dismiss-on-outside";
 import { useUserStore } from "@/stores/use-user-store";
 import { getCurrentWord, measureCaretPosition, replaceCurrentWord, type CurrentWord } from "./prompt-editor-utils";
 import { TranslateIcon } from "./translate-icon";
@@ -16,6 +17,10 @@ import "./prompt-editor-dialog.css";
 
 const SEARCH_DEBOUNCE_MS = 160;
 const MAX_SUGGESTIONS = 12;
+/** 超过这个长度就不是在打 tag 了（抄 WeiLin 的保护），直接关掉候选省一次请求。 */
+const MAX_QUERY_LENGTH = 24;
+/** 失焦后延迟关闭候选，留出时间给候选项的 click 落地（WeiLin 用的也是 100ms）。 */
+const BLUR_CLOSE_DELAY_MS = 120;
 /** 单击进入编辑前的等待时间，用于让双击（禁用）先取消它。 */
 const CLICK_EDIT_DELAY_MS = 180;
 const MIN_WIDTH = 520;
@@ -83,6 +88,12 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
     const [draft, setDraft] = useState("");
     const [suggestions, setSuggestions] = useState<TagSearchResult[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
+    /**
+     * 驱动候选搜索的关键词。必须是 state：
+     * 光标移动（点击/方向键/选区变化）不会改变 draft，只改 currentWordRef（ref 不触发重渲染），
+     * 以前 effect 依赖 draft 就导致「点到别的词，候选框位置移过去了但内容还是旧词的结果」。
+     */
+    const [searchQuery, setSearchQuery] = useState("");
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [menuStyle, setMenuStyle] = useState<CSSProperties>({ left: 0, top: 0 });
     const [showDeleteButtons, setShowDeleteButtons] = useState(true);
@@ -100,6 +111,10 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
     const translateRequestRef = useRef(0);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const wrapRef = useRef<HTMLDivElement>(null);
+    /** 候选层容器，用于「点击外部关闭」时把候选层本身排除在外部之外。 */
+    const suggestionsRef = useRef<HTMLDivElement>(null);
+    /** 失焦延迟关闭的定时器，点回输入框/候选项要能取消它。 */
+    const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dragOffsetRef = useRef<DragState | null>(null);
     const resizeRef = useRef<ResizeState | null>(null);
     const currentWordRef = useRef<CurrentWord>({ query: "", replaceStart: 0, replaceEnd: 0 });
@@ -140,6 +155,7 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
     useEffect(() => {
         return () => {
             if (editTimerRef.current) clearTimeout(editTimerRef.current);
+            if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
         };
     }, []);
 
@@ -158,15 +174,39 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
         setMenuStyle(measureCaretPosition(textarea, wrap));
     }, []);
 
+    /**
+     * 关闭候选并作废在途请求。
+     * 自增 searchIdRef 是关键：否则「输入马尾 → 立刻退格删空」时，
+     * 那个已经飞出去的请求回来后守卫仍然成立，会把刚关掉的候选框重新打开。
+     */
+    const closeSuggestions = useCallback(() => {
+        searchIdRef.current += 1;
+        setSuggestions([]);
+        setShowSuggestions(false);
+        setSelectedIndex(0);
+    }, []);
+
+    /**
+     * 光标位置变了就同步「当前词」。
+     * ref 与 state 必须双写：insertSuggestion 要同步读 ref 拿替换区间，
+     * 而搜索 effect 需要 state 才会重跑。
+     */
+    const updateCurrentWord = useCallback((value: string, selectionStart: number, selectionEnd = selectionStart) => {
+        const word = getCurrentWord(value, selectionStart, selectionEnd);
+        currentWordRef.current = word;
+        setSearchQuery(word.query);
+    }, []);
+
     useEffect(() => {
         if (!open) return;
         if (!suggestionsEnabled) {
-            setShowSuggestions(false);
+            closeSuggestions();
             return;
         }
-        const keyword = currentWordRef.current.query.trim();
-        if (!keyword) {
-            setShowSuggestions(false);
+        const keyword = searchQuery.trim();
+        // 空词（含退格删空）与超长输入都不该有候选：必须走 closeSuggestions 作废在途请求。
+        if (!keyword || keyword.length > MAX_QUERY_LENGTH) {
+            closeSuggestions();
             return;
         }
         const requestId = searchIdRef.current + 1;
@@ -179,10 +219,14 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                     setSelectedIndex(0);
                     setShowSuggestions(results.length > 0);
                 })
-                .catch(() => setShowSuggestions(false));
+                .catch(() => {
+                    if (searchIdRef.current !== requestId) return;
+                    setSuggestions([]);
+                    setShowSuggestions(false);
+                });
         }, SEARCH_DEBOUNCE_MS);
         return () => window.clearTimeout(timeout);
-    }, [draft, open, suggestionsEnabled]);
+    }, [closeSuggestions, open, searchQuery, suggestionsEnabled]);
 
     useEffect(() => {
         if (!dragging) return;
@@ -231,6 +275,10 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
             window.removeEventListener("pointerup", stop);
         };
     }, [resizing]);
+
+    // 点击编辑器外部（含 UI 任意空白处）就收起候选。
+    // 必须放在下面 `if (!open) return null` 守卫之前，否则违反 hooks 调用顺序规则。
+    useDismissOnOutside({ enabled: showSuggestions, refs: [wrapRef, suggestionsRef], onDismiss: closeSuggestions });
 
     if (!open || typeof document === "undefined") return null;
 
@@ -313,7 +361,7 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
 
     const handleDraftChange = (value: string, caret: number) => {
         setDraft(value);
-        currentWordRef.current = getCurrentWord(value, caret);
+        updateCurrentWord(value, caret);
         setTokens(normalizePromptBlockTokens(parsePromptToTokens(value, tokens)));
         window.requestAnimationFrame(syncCaretMenu);
     };
@@ -326,8 +374,9 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
         );
         setDraft(value);
         commitTokens(nextTokens);
-        setShowSuggestions(false);
-        currentWordRef.current = getCurrentWord(value, caret);
+        closeSuggestions();
+        // 插入后光标停在新 tag 之后（分隔符外），此处是空词，不会立刻又弹出候选。
+        updateCurrentWord(value, caret);
         window.setTimeout(() => {
             textareaRef.current?.focus();
             textareaRef.current?.setSelectionRange(caret, caret);
@@ -354,7 +403,7 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
             }
             if (event.key === "Escape") {
                 event.preventDefault();
-                setShowSuggestions(false);
+                closeSuggestions();
             }
         }
     };
@@ -379,6 +428,8 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
     /** 单击 tag 文本延迟进入编辑，双击会先清掉定时器改为切换禁用。 */
     const scheduleEditToken = (token: PromptBlockToken) => {
         if (token.kind === "newline") return;
+        // 焦点即将转到 token 的行内输入框，候选层必须先收起，否则会挂在那儿不动。
+        closeSuggestions();
         if (editTimerRef.current) clearTimeout(editTimerRef.current);
         editTimerRef.current = setTimeout(() => {
             setEditingTokenId(token.id);
@@ -439,15 +490,39 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                     placeholder="输入提示词，使用逗号分隔"
                     onChange={(event) => handleDraftChange(event.target.value, event.target.selectionStart)}
                     onKeyDown={handleKeyDown}
+                    onFocus={() => {
+                        // 点回输入框要撤销失焦关闭，否则刚聚焦候选就被上一轮定时器收掉。
+                        if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+                    }}
                     onClick={(event) => {
-                        currentWordRef.current = getCurrentWord(event.currentTarget.value, event.currentTarget.selectionStart);
+                        updateCurrentWord(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
                         syncCaretMenu();
                     }}
-                    onBlur={() => commitTokens(parsePromptToTokens(draft, tokens))}
+                    onSelect={(event) => {
+                        // 鼠标点击、拖选、Home/End 走这里；不补这个「点到别的词候选内容不变」照旧。
+                        updateCurrentWord(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
+                        syncCaretMenu();
+                    }}
+                    onKeyUp={(event) => {
+                        // 纯方向键移动光标不一定触发 select 事件，必须另外补 keyup（WeiLin 也是绑 keyup）。
+                        // 上/下键在候选打开时是选择候选项，不能拿来改当前词，否则候选会被自己刷掉。
+                        if (showSuggestions && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
+                        updateCurrentWord(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
+                        syncCaretMenu();
+                    }}
+                    onBlur={() => {
+                        commitTokens(parsePromptToTokens(draft, tokens));
+                        // 延迟关闭：候选项的 click 要先落地（WeiLin 同样是延迟处理）。
+                        if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+                        blurTimerRef.current = setTimeout(closeSuggestions, BLUR_CLOSE_DELAY_MS);
+                    }}
                 />
                 <span className="pe-dialog__counter">{tokenCount} tokens</span>
                 {showSuggestions ? (
-                    <div className="pe-suggestions" style={menuStyle} onMouseDown={(event) => event.preventDefault()}>
+                    <div ref={suggestionsRef} className="pe-suggestions" style={menuStyle} onMouseDown={(event) => event.preventDefault()}>
+                        <button type="button" className="pe-suggestions__close" title="关闭候选" aria-label="关闭候选" onClick={closeSuggestions}>
+                            ×
+                        </button>
                         {suggestions.map((suggestion, index) => (
                             <button key={`${suggestion.name}-${index}`} type="button" className={`pe-suggestion ${index === selectedIndex ? "is-selected" : ""}`} onMouseEnter={() => setSelectedIndex(index)} onClick={() => insertSuggestion(suggestion)}>
                                 <span className="pe-suggestion__text">{suggestion.name}</span>
@@ -570,11 +645,7 @@ export function PromptEditorDialog({ open, title = "NovelAI 提示词编辑器",
                 </div>
             )}
 
-            {inline
-                ? null
-                : RESIZE_CORNERS.map((corner) => (
-                      <div key={corner} className={`pe-resize pe-resize--${corner}`} onPointerDown={(event) => startResize(corner, event)} />
-                  ))}
+            {inline ? null : RESIZE_CORNERS.map((corner) => <div key={corner} className={`pe-resize pe-resize--${corner}`} onPointerDown={(event) => startResize(corner, event)} />)}
         </div>
     );
 

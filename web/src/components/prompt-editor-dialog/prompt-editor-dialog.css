@@ -99,6 +99,32 @@
     box-shadow: 0 12px 32px rgb(0 0 0 / 0.4);
 }
 
+/* 手动关闭按钮：sticky 吸在候选列表顶部，自成一行靠右，不遮挡候选项。
+   注意不能用 left:100%+负 margin 来靠右——sticky 的 left/right 只约束水平滚动，
+   这个容器只有 overflow-y，水平方向不会生效。用 margin-left:auto 才可靠。 */
+.pe-suggestions__close {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    margin-left: auto;
+    border: none;
+    border-radius: 0 8px 0 6px;
+    background: #2f2f35;
+    color: #a1a1aa;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.pe-suggestions__close:hover {
+    background: #52525b;
+    color: #fafafa;
+}
+
 .pe-suggestion {
     display: flex;
     align-items: center;
