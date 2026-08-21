@@ -587,6 +587,14 @@ func modelChannelNameMatches(protocol, configured, requested string) bool {
 func normalizeNovelAIModelName(modelName string) string {
 	value := strings.ToLower(strings.TrimSpace(modelName))
 	value = strings.ReplaceAll(value, "_", "-")
+	// V5 必须先于旧版本判断。此处处理的是后台已配置模型名/标准 ID，
+	// 只识别 NovelAI 自己的 ID/显示名，避免把 gpt-5.5 等其他模型误判成 NAI V5。
+	if value == "5" || value == "v5" || strings.Contains(value, "nai-diffusion-5") || strings.Contains(value, "nai diffusion v5") {
+		if strings.Contains(value, "curated") {
+			return "nai-diffusion-5-curated"
+		}
+		return "nai-diffusion-5-full"
+	}
 	if strings.Contains(value, "4.5") || strings.Contains(value, "v4.5") || strings.Contains(value, "4-5") {
 		if strings.Contains(value, "curated") {
 			return "nai-diffusion-4-5-curated"
@@ -613,6 +621,8 @@ func normalizeNovelAIModelName(modelName string) string {
 
 func novelAIImageModels() []string {
 	return []string{
+		"NAI Diffusion V5 Full",
+		"NAI Diffusion V5 Curated",
 		"NAI Diffusion V4.5 Full",
 		"NAI Diffusion V4.5 Curated",
 		"NAI Diffusion V4 Full",

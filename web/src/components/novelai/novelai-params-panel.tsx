@@ -28,7 +28,7 @@ type NovelAIParamsPanelProps = {
      *
      * 画布 NovelAI 节点创建时 novelAIModel/model 都是空的（让 ModelPicker 显示全局默认），
      * 不传这个兜底会让 resolveNovelAIModelId 拿到空串并回落 V3，
-     * 于是首次打开面板时 isV4 判定为 false —— V4 模型下也不会标注「native 不可用」。
+     * 于是首次打开面板时现代模型判定为 false —— V4/V5 下也不会标注「native 不可用」。
      */
     fallbackModel?: string;
 };
@@ -58,7 +58,8 @@ export function NovelAIParamsPanel({ metadata, theme, onChange, variant = "popov
     const seedLocked = Boolean(metadata.naSeedLocked);
     const count = Math.max(1, Math.min(MAX_COUNT, Math.floor(Math.abs(Number(metadata.count)) || 1)));
     const modelId = resolveNovelAIModelId(metadata.novelAIModel || metadata.model || fallbackModel);
-    const isV4 = modelId.startsWith("nai-diffusion-4");
+    // V4 / V4.5 / V5 都使用结构化 Prompt 协议，并共享 native/SMEA/Decrisp 等限制。
+    const usesStructuredPrompt = modelId.startsWith("nai-diffusion-4") || modelId.startsWith("nai-diffusion-5");
     // 默认关闭，所以用 === true 判定（!== false 会让 undefined 变成开启）。
     const qualityToggle = metadata.naQualityToggle === true;
     const addOriginalImage = metadata.naAddOriginalImage === true;
@@ -111,12 +112,12 @@ export function NovelAIParamsPanel({ metadata, theme, onChange, variant = "popov
             </div>
 
             <div className="na-field">
-                <div className="na-label">噪声调度{isV4 ? "（V4 不支持 Native）" : ""}</div>
+                <div className="na-label">噪声调度{usesStructuredPrompt ? "（V4+ 不支持 Native）" : ""}</div>
                 <NativeSelect
-                    value={isV4 && metadata.novelAINoiseSchedule === "native" ? "karras" : metadata.novelAINoiseSchedule || "karras"}
-                    options={NOVELAI_NOISE_SCHEDULES.map((value) => ({ value, label: isV4 && value === "native" ? "Native（V4 不可用）" : NOISE_LABELS[value] || value }))}
+                    value={usesStructuredPrompt && metadata.novelAINoiseSchedule === "native" ? "karras" : metadata.novelAINoiseSchedule || "karras"}
+                    options={NOVELAI_NOISE_SCHEDULES.map((value) => ({ value, label: usesStructuredPrompt && value === "native" ? "Native（V4+ 不可用）" : NOISE_LABELS[value] || value }))}
                     onChange={(value) => {
-                        if (isV4 && value === "native") return;
+                        if (usesStructuredPrompt && value === "native") return;
                         onChange({ novelAINoiseSchedule: value as CanvasNodeMetadata["novelAINoiseSchedule"] });
                     }}
                 />

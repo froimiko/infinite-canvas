@@ -41,7 +41,7 @@ func novelAIDebugEnabled() bool {
 
 var novelAIFreeGenerationLocks sync.Map // map[string]chan struct{}，key 为 baseURL+APIKey 的 SHA-256，避免泄露 Token。
 
-// NovelAI API 请求结构（完整 V4/V4.5 规范）
+// NovelAI API 请求结构（V4+ 结构化规范，V5 沿用 v4_prompt 字段）
 type novelAIRequest struct {
 	Input      string            `json:"input"`
 	Model      string            `json:"model"`
@@ -63,7 +63,7 @@ type novelAIParameters struct {
 	// 负面提示词
 	NegativePrompt string `json:"negative_prompt"`
 
-	// V4/V4.5 特性参数
+	// V4+ 兼容参数
 	UCPreset          int      `json:"ucPreset"`
 	QualityToggle     bool     `json:"qualityToggle"`
 	SkipCfgAboveSigma *float64 `json:"skip_cfg_above_sigma"` // Variety+: 非 nil 为开启，nil 为关闭
@@ -225,26 +225,26 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 		}
 	}
 
-	isV4Model := isNovelAIV4Model(model)
-	if openAI.NovelAIEnabled && isV4Model {
-		// NAI4 会拒绝/忽略 SMEA，参考实现直接删除 sm/sm_dyn；这里用 omitempty 指针避免发送。
+	usesStructuredPrompt := usesNovelAIStructuredPrompt(model)
+	if openAI.NovelAIEnabled && usesStructuredPrompt {
+		// V4+ 结构化模型拒绝/忽略 SMEA；用 omitempty 指针避免发送。
 		sm = nil
 		smDyn = nil
-		// V4 不支持 native，参考实现同样在此回退为 karras。
+		// V4+ 不支持 native，在此统一回退为 karras。
 		if noiseSchedule == "native" {
 			noiseSchedule = "karras"
 		}
-		// dynamic_thresholding（Decrisp）仅 V3 生效，V4 下不发送。
+		// dynamic_thresholding（Decrisp）仅 V3 生效，V4+ 下不发送。
 		dynamicThresholding = false
 	}
 
 	// 质量词由前端按模型注入，这里不再追加，避免与前端预设重复。
 	fullPrompt := openAI.Prompt
 
-	// uc 是 V3 时代的负面提示词冗余字段，参考实现仅在非 V4 模型下发送。
-	// V4 使用 v4_negative_prompt 承载负面词，多发 uc 会造成负面词被重复解析。
+	// uc 是 V3 时代的负面提示词冗余字段，仅在非结构化模型下发送。
+	// V4/V4.5/V5 使用 v4_negative_prompt 承载负面词，多发 uc 会造成重复解析。
 	v3UC := ""
-	if !isV4Model {
+	if !usesStructuredPrompt {
 		v3UC = negativePrompt
 	}
 
@@ -265,7 +265,7 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 			Seed:           seed,
 			NegativePrompt: negativePrompt,
 
-			// V4/V4.5 特性参数
+			// V4+ 兼容参数
 			UCPreset:          ucPreset,
 			QualityToggle:     normalizeBool(openAI.QualityToggle, false),
 			SkipCfgAboveSigma: skipCfgAboveSigma,
@@ -287,8 +287,8 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 		},
 	}
 
-	// V4/V4.5 模型：添加结构化 Prompt
-	if isV4Model {
+	// V4/V4.5/V5 模型：添加结构化 Prompt（官方字段名仍为 v4_prompt / v4_negative_prompt）。
+	if usesStructuredPrompt {
 		useManualRoleCoords := openAI.NovelAIEnabled && openAI.DivideRoles && !openAI.UseAutoPositioning
 		charCaptions, charNegCaptions, compatPrompts := buildNovelAICharacterPrompts(openAI.CharacterPrompts, useManualRoleCoords)
 		useRolePrompts := openAI.NovelAIEnabled && openAI.DivideRoles && len(charCaptions) > 0
@@ -433,18 +433,32 @@ func resolveNovelAIModel(modelName string) string {
 
 	// 完全匹配已知模型 ID，直接返回。
 	switch modelName {
-	case "nai-diffusion-4-5-full", "nai-diffusion-4-5-curated",
+	case "nai-diffusion-5-full", "nai-diffusion-5-curated",
+		"nai-diffusion-4-5-full", "nai-diffusion-4-5-curated",
 		"nai-diffusion-4-full", "nai-diffusion-4-curated-preview",
 		"nai-diffusion-3", "nai-diffusion-2", "nai-diffusion-furry":
 		return modelName
 	}
 
 	// 模糊匹配：使用分隔符边界防止 "xv3y" 匹配 "v3"。
+	// 顺序从新到旧。裸 "5" 仅允许完全相等，否则 "v4.5" 的末尾 5 会误判成 V5。
+	if modelName == "5" || containsModelKeyword(modelName, "v5") || containsModelKeyword(modelName, "nai-diffusion-5") {
+		if strings.Contains(modelName, "curated") {
+			return "nai-diffusion-5-curated"
+		}
+		return "nai-diffusion-5-full"
+	}
 	// 例如 "nai-diffusion-4-5" 应匹配 V4.5，而 "anime-v3-style" 不应匹配 V3。
 	if containsModelKeyword(modelName, "4.5") || containsModelKeyword(modelName, "v4.5") || containsModelKeyword(modelName, "4-5") {
+		if strings.Contains(modelName, "curated") {
+			return "nai-diffusion-4-5-curated"
+		}
 		return "nai-diffusion-4-5-full"
 	}
 	if containsModelKeyword(modelName, "nai-diffusion-4") || containsModelKeyword(modelName, "v4") {
+		if strings.Contains(modelName, "full") {
+			return "nai-diffusion-4-full"
+		}
 		return "nai-diffusion-4-curated-preview"
 	}
 	if containsModelKeyword(modelName, "nai-diffusion-3") || containsModelKeyword(modelName, "v3") {
@@ -488,13 +502,11 @@ func isModelNameChar(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 }
 
-func isNovelAIV4Model(model string) bool {
+// usesNovelAIStructuredPrompt 判断模型是否使用官方的 v4_prompt / v4_negative_prompt 结构。
+// 字段名虽然仍叫 v4，但 V5 沿用同一协议；不要再用版本号命名这个判定，避免以后漏新模型。
+func usesNovelAIStructuredPrompt(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "nai-diffusion-4-5-full" ||
-		model == "nai-diffusion-4-5-curated" ||
-		model == "nai-diffusion-4-full" ||
-		model == "nai-diffusion-4-curated-preview" ||
-		strings.HasPrefix(model, "nai-diffusion-4")
+	return strings.HasPrefix(model, "nai-diffusion-4") || strings.HasPrefix(model, "nai-diffusion-5")
 }
 
 func firstNonEmpty(values ...string) string {

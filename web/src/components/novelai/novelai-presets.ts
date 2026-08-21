@@ -22,9 +22,16 @@ export const NOVELAI_UC_PRESET_OPTIONS: { value: NovelAIUcPreset; label: string 
 export const DEFAULT_NOVELAI_QUALITY_PRESET: NovelAIQualityPreset = "nai-default";
 export const DEFAULT_NOVELAI_UC_PRESET: NovelAIUcPreset = "heavy";
 
+// NovelAI 官方文档尚未公开 V5 专属质量词。先按对应版本继承 V4.5，
+// 这样 V5 不会因为未知模型而静默落到 V3 质量词；官方更新后只需改这两个常量。
+const V45_FULL_QUALITY_TAGS = "location, very aesthetic, masterpiece, no text";
+const V45_CURATED_QUALITY_TAGS = "location, masterpiece, no text, -0.8::feet::, rating:general";
+
 const QUALITY_TAGS: Record<string, string> = {
-    "nai-diffusion-4-5-full": "location, very aesthetic, masterpiece, no text",
-    "nai-diffusion-4-5-curated": "location, masterpiece, no text, -0.8::feet::, rating:general",
+    "nai-diffusion-5-full": V45_FULL_QUALITY_TAGS,
+    "nai-diffusion-5-curated": V45_CURATED_QUALITY_TAGS,
+    "nai-diffusion-4-5-full": V45_FULL_QUALITY_TAGS,
+    "nai-diffusion-4-5-curated": V45_CURATED_QUALITY_TAGS,
     "nai-diffusion-4-full": "no text, best quality, very aesthetic, absurdres",
     "nai-diffusion-4-curated-preview": "rating:general, amazing quality, very aesthetic, absurdres",
     "nai-diffusion-3": "best quality, amazing quality, very aesthetic, absurdres",
@@ -34,21 +41,29 @@ const QUALITY_TAGS: Record<string, string> = {
 const FURRY_UC =
     "{{worst quality}}, [displeasing], {unusual pupils}, guide lines, {{unfinished}}, {bad}, url, artist name, {{tall image}}, mosaic, {sketch page}, comic panel, impact (font), [dated], {logo}, ych, {what}, {where is your god now}, {distorted text}, repeated text, {floating head}, {1994}, {widescreen}, absolutely everyone, sequence, {compression artifacts}, hard translated, {cropped}, {commissioner name}, unknown text, high contrast";
 
+const V45_FULL_UC_PRESETS: Record<NovelAIUcPreset, string> = {
+    heavy: "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page",
+    light: "lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, multiple views, very displeasing, too many watermarks, negative space, blank page",
+    furry: "{worst quality}, distracting watermark, unfinished, bad quality, {widescreen}, upscale, {sequence}, {{grandfathered content}}, blurred foreground, chromatic aberration, sketch, everyone, [sketch background], simple, [flat colors], ych (character), outline, multiple scenes, [[horror (theme)]], comic",
+    human: "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy",
+    none: "",
+};
+
+const V45_CURATED_UC_PRESETS: Record<NovelAIUcPreset, string> = {
+    heavy: "blurry, lowres, upscaled, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, negative space, blank page",
+    light: "blurry, lowres, upscaled, artistic error, scan artifacts, jpeg artifacts, logo, too many watermarks, negative space, blank page",
+    furry: "{worst quality}, distracting watermark, unfinished, bad quality, {widescreen}, upscale, {sequence}, {{grandfathered content}}, blurred foreground, chromatic aberration, sketch, everyone, [sketch background], simple, [flat colors], ych (character), outline, multiple scenes, [[horror (theme)]], comic",
+    human: "blurry, lowres, upscaled, artistic error, film grain, scan artifacts, bad anatomy, bad hands, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, @_@, mismatched pupils, glowing eyes, negative space, blank page",
+    none: "",
+};
+
+// V5 官方专属 UC 文本尚未公开，暂按对应 V4.5 版本继承；
+// 显式列出 V5 key，避免未知模型落到 V3_UC_PRESET。
 const UC_PRESETS: Record<string, Record<NovelAIUcPreset, string>> = {
-    "nai-diffusion-4-5-full": {
-        heavy: "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page",
-        light: "lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, multiple views, very displeasing, too many watermarks, negative space, blank page",
-        furry: "{worst quality}, distracting watermark, unfinished, bad quality, {widescreen}, upscale, {sequence}, {{grandfathered content}}, blurred foreground, chromatic aberration, sketch, everyone, [sketch background], simple, [flat colors], ych (character), outline, multiple scenes, [[horror (theme)]], comic",
-        human: "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy",
-        none: "",
-    },
-    "nai-diffusion-4-5-curated": {
-        heavy: "blurry, lowres, upscaled, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, negative space, blank page",
-        light: "blurry, lowres, upscaled, artistic error, scan artifacts, jpeg artifacts, logo, too many watermarks, negative space, blank page",
-        furry: "{worst quality}, distracting watermark, unfinished, bad quality, {widescreen}, upscale, {sequence}, {{grandfathered content}}, blurred foreground, chromatic aberration, sketch, everyone, [sketch background], simple, [flat colors], ych (character), outline, multiple scenes, [[horror (theme)]], comic",
-        human: "blurry, lowres, upscaled, artistic error, film grain, scan artifacts, bad anatomy, bad hands, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, @_@, mismatched pupils, glowing eyes, negative space, blank page",
-        none: "",
-    },
+    "nai-diffusion-5-full": V45_FULL_UC_PRESETS,
+    "nai-diffusion-5-curated": V45_CURATED_UC_PRESETS,
+    "nai-diffusion-4-5-full": V45_FULL_UC_PRESETS,
+    "nai-diffusion-4-5-curated": V45_CURATED_UC_PRESETS,
     "nai-diffusion-4-full": {
         heavy: "blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks",
         light: "blurry, lowres, error, worst quality, bad quality, jpeg artifacts, very displeasing",
@@ -85,7 +100,10 @@ export function resolveNovelAIModelId(model: string | undefined) {
     const value = (model || "").toLowerCase().trim().replace(/_/g, "-");
     if (!value) return "nai-diffusion-3";
     if (QUALITY_TAGS[value]) return value;
-    // 使用词边界匹配，防止 "anime-v3-style" 之类的子串误匹配
+    // 使用词边界匹配，防止 "anime-v3-style" 之类的子串误匹配。
+    // 顺序必须从新到旧：先 V5，再 V4.5/V4；V5 简写默认 Full，含 curated 才归 Curated。
+    // 裸 "5" 只能完全相等，不能用词边界匹配："v4.5" 里的小数点也是分隔符，会把末尾 5 误判成 V5。
+    if (value === "5" || hasModelKeyword(value, "v5") || hasModelKeyword(value, "nai-diffusion-5")) return value.includes("curated") ? "nai-diffusion-5-curated" : "nai-diffusion-5-full";
     if (hasModelKeyword(value, "4.5") || hasModelKeyword(value, "v4.5") || hasModelKeyword(value, "4-5")) return value.includes("curated") ? "nai-diffusion-4-5-curated" : "nai-diffusion-4-5-full";
     if (hasModelKeyword(value, "nai-diffusion-4") || hasModelKeyword(value, "v4")) return value.includes("full") ? "nai-diffusion-4-full" : "nai-diffusion-4-curated-preview";
     if (hasModelKeyword(value, "nai-diffusion-3") || hasModelKeyword(value, "v3")) return "nai-diffusion-3";

@@ -506,11 +506,17 @@ func TestResolveNovelAIModelWordBoundary(t *testing.T) {
 	}{
 		// 完全匹配
 		{"nai-diffusion-3", "nai-diffusion-3"},
+		{"nai-diffusion-5-full", "nai-diffusion-5-full"},
+		{"nai-diffusion-5-curated", "nai-diffusion-5-curated"},
 		{"nai-diffusion-4-5-full", "nai-diffusion-4-5-full"},
 		{"nai-diffusion-4-curated-preview", "nai-diffusion-4-curated-preview"},
 		// 简写带分隔符
 		{"v3", "nai-diffusion-3"},
 		{"v4", "nai-diffusion-4-curated-preview"},
+		{"v5", "nai-diffusion-5-full"},
+		{"5", "nai-diffusion-5-full"},
+		{"NAI Diffusion V5 Full", "nai-diffusion-5-full"},
+		{"NAI Diffusion V5 Curated", "nai-diffusion-5-curated"},
 		{"v4.5", "nai-diffusion-4-5-full"},
 		{"4.5", "nai-diffusion-4-5-full"},
 		{"nai-diffusion-4-5", "nai-diffusion-4-5-full"},

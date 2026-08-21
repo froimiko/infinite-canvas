@@ -188,6 +188,8 @@ func TestResolveNovelAIModelStripsChannelPrefix(t *testing.T) {
 		input  string
 		expect string
 	}{
+		{"__cloud__::nai-diffusion-5-full", "nai-diffusion-5-full"},
+		{"__cloud__::nai-diffusion-5-curated", "nai-diffusion-5-curated"},
 		{"__cloud__::nai-diffusion-4-5-full", "nai-diffusion-4-5-full"},
 		{"__cloud__::nai-diffusion-4-5-curated", "nai-diffusion-4-5-curated"},
 		{"__cloud__::nai-diffusion-4-full", "nai-diffusion-4-full"},
@@ -204,7 +206,7 @@ func TestResolveNovelAIModelStripsChannelPrefix(t *testing.T) {
 
 // 参考实现里不存在 aqtPreset 这个字段，任何模型都不能发送。
 func TestConvertToNovelAIRequestNeverSendsAqtPreset(t *testing.T) {
-	for _, model := range []string{"nai-diffusion-3", "nai-diffusion-4-full", "nai-diffusion-4-5-full", "nai-diffusion-4-5-curated"} {
+	for _, model := range []string{"nai-diffusion-3", "nai-diffusion-4-full", "nai-diffusion-4-5-full", "nai-diffusion-4-5-curated", "nai-diffusion-5-full", "nai-diffusion-5-curated"} {
 		req := mustConvertToNovelAIRequest(t, openAIImageRequest{
 			Prompt:         "1girl, solo",
 			NegativePrompt: "bad hands",

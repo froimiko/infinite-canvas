@@ -1,11 +1,13 @@
 import type { NovelAISettings, NovelAIAqtPreset, NovelAINoiseSchedule, NovelAIUCPreset } from "@/types/image";
 
 export const NOVELAI_MODELS = [
-    { id: "nai-diffusion-3", name: "NovelAI Diffusion V3" },
-    { id: "nai-diffusion-4-curated-preview", name: "NAI Diffusion V4 Curated" },
-    { id: "nai-diffusion-4-full", name: "NAI Diffusion V4 Full" },
-    { id: "nai-diffusion-4-5-curated", name: "NAI Diffusion V4.5 Curated" },
+    { id: "nai-diffusion-5-full", name: "NAI Diffusion V5 Full" },
+    { id: "nai-diffusion-5-curated", name: "NAI Diffusion V5 Curated" },
     { id: "nai-diffusion-4-5-full", name: "NAI Diffusion V4.5 Full" },
+    { id: "nai-diffusion-4-5-curated", name: "NAI Diffusion V4.5 Curated" },
+    { id: "nai-diffusion-4-full", name: "NAI Diffusion V4 Full" },
+    { id: "nai-diffusion-4-curated-preview", name: "NAI Diffusion V4 Curated" },
+    { id: "nai-diffusion-3", name: "NovelAI Diffusion V3" },
 ] as const;
 
 export const NOVELAI_SAMPLERS = ["k_euler", "k_euler_ancestral", "k_dpmpp_2s_ancestral", "k_dpmpp_2m", "k_dpmpp_sde", "ddim_v3"] as const;
