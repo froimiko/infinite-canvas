@@ -8,7 +8,7 @@ import { saveAs } from "file-saver";
 
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
-import { normalizeNovelAISettings } from "@/lib/novelai-config";
+import { countEffectiveNovelAICharacters, normalizeNovelAICharacterPrompts, normalizeNovelAISettings } from "@/lib/novelai-config";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -17,6 +17,7 @@ import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/ima
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { NovelAISettings, ReferenceImage } from "@/types/image";
 import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
+import { supportsMultiCharacter } from "@/components/novelai/character-position-layout";
 import { applyNovelAIQualityTags, applyNovelAIUcPreset, normalizeNovelAIQualityPreset, normalizeNovelAIUcPreset, novelAIUcPresetApiName, resolveNovelAIModelId } from "@/components/novelai/novelai-presets";
 import { useNovelAIWorkbenchStore } from "@/stores/use-novelai-workbench-store";
 import { GeneralGenerationPanel } from "./components/general-generation-panel";
@@ -74,7 +75,6 @@ type GenerationLog = {
 };
 
 type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count"> & NovelAISettings;
-
 
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
@@ -330,6 +330,12 @@ export default function ImagePage() {
                 positiveTokens: [],
                 negativePrompt: log.negativePrompt || "",
                 negativeTokens: [],
+                // 角色快照一并恢复。老记录（阶段4 之前）的 config 里没有角色字段，
+                // normalizeLogConfig 会补成空数组，恢复后角色区为空 —— 与旧行为一致。
+                // 回写前过一遍归一化：老存档的角色可能缺 id / center / enabled，
+                // 直接回填会让 React key 退化成下标、位置画布读不到坐标。
+                characters: normalizeNovelAICharacterPrompts(log.config.novelAICharacterPrompts),
+                charactersAiChoice: log.config.novelAIUseAutoPositioning,
             });
         }
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
@@ -356,7 +362,9 @@ export default function ImagePage() {
      * NovelAI 快照。
      *
      * 与画布 NovelAI 节点走的是同一套注入规则（canvas-client-page 里那段），改一处必须同步另一处：
-     *  - 质量词按当前模型追加到正面提示词末尾（applyNovelAIQualityTags）
+     *  - 质量词按当前模型追加到正面提示词末尾（applyNovelAIQualityTags）。
+     *    角色提示词**不**注入质量词：参考项目也只给主提示词加，每个角色再各加一份
+     *    会让质量词在 v4_prompt 里重复出现，稀释角色描述本身的权重；
      *  - 负面预设词拼在用户负面词前面（applyNovelAIUcPreset）
      *  - uc_preset 必须跟随「负面质量词」下拉，否则上游还会按默认 Heavy 再叠一份负面词
      *  - novelai_model 交给 buildNovelAIRequestParameters 里的 modelOptionName 剥渠道前缀
@@ -365,6 +373,17 @@ export default function ImagePage() {
         const presetModel = resolveNovelAIModelId(model);
         const text = applyNovelAIQualityTags(rawPrompt, presetModel, normalizeNovelAIQualityPreset(novelAI.naQualityPreset));
         const negativePrompt = applyNovelAIUcPreset(novelAI.negativePrompt, presetModel, normalizeNovelAIUcPreset(novelAI.naUcPreset));
+        // 多角色字段只在 V4+ 模型下发。V3 没有结构化 prompt（v4_prompt / char_captions），
+        // 发 divide_roles 是无意义参数，还会让后端误入 DivideRoles 分支。
+        // supportsMultiCharacter 内部走 resolveNovelAIModelId，天然处理 `渠道id::` 前缀。
+        const multiCharacter = supportsMultiCharacter(model);
+        // 有效角色数复用 novelai-config 的口径（countEffectiveNovelAICharacters）：
+        // buildNovelAICharacterPromptPayload 过滤的就是「enabled !== false 且正负提示词非空」的角色，
+        // divide_roles 的判定必须与它完全一致 —— 否则会出现「声称分离角色、char_captions 却为空」
+        // 的自相矛盾请求（后端虽有 len(charCaptions) > 0 兜底，前端不该发这种参数）。
+        // 这里故意不复制角色列表：把整个 novelAI.characters 原样放进快照，
+        // 过滤交给请求层与历史恢复各自做，避免快照里存两份口径不同的副本。
+        const effectiveCharacters = multiCharacter ? countEffectiveNovelAICharacters(novelAI.characters) : 0;
         const config: AiConfig = {
             ...effectiveConfig,
             model,
@@ -383,6 +402,15 @@ export default function ImagePage() {
             novelAIUcPreset: novelAIUcPresetApiName(normalizeNovelAIUcPreset(novelAI.naUcPreset)),
             novelAIQualityToggle: novelAI.naQualityToggle,
             novelAIAddOriginalImage: novelAI.naAddOriginalImage,
+            // 角色三件套：完整列表（含禁用/空占位，供历史记录恢复 UI）、分离开关、位置模式。
+            // novelAIDivideRoles 用「有效角色数 ≥ 1」而不是 characters.length ≥ 1：
+            // 列表里可能全是 enabled=false 或空提示词的占位角色，那种情况下 payload 会是空的，
+            // 开着 divide_roles 只会让后端进「分离但无 char_caption」的分支。
+            novelAICharacterPrompts: multiCharacter ? novelAI.characters : [],
+            novelAIDivideRoles: multiCharacter && effectiveCharacters > 0,
+            // charactersAiChoice=true 是「AI 选择位置」模式，直传 use_auto_positioning 语义。
+            // 是否存在有效角色只影响 divide_roles；位置模式是用户选择，历史记录也要原样保存。
+            novelAIUseAutoPositioning: multiCharacter ? novelAI.charactersAiChoice : false,
         };
         return { text, negativePrompt, config, references: [...references] };
     };
@@ -393,9 +421,7 @@ export default function ImagePage() {
             // 通用生图的 negativePrompt 恒为空串（译文区只作展示）；NovelAI 标签页才会带负面词。
             // 有参考图就走 requestEdit（img2img），此时「附加原图」开关才真正生效。
             const requestOptions = snapshot.negativePrompt ? { negativePrompt: snapshot.negativePrompt } : undefined;
-            const result = snapshot.references.length
-                ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions)
-                : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);

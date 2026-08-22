@@ -57,7 +57,11 @@ func TestConvertToNovelAIRequestDisabledKeepsLegacyDefaults(t *testing.T) {
 	if req.Parameters.Seed != 0 {
 		t.Fatalf("seed = %d, want legacy random seed marker 0", req.Parameters.Seed)
 	}
-	if req.Parameters.UCPreset != 4 {
+	// ucPreset 取值必须是 Heavy=0 / Light=1 / Human Focus=2 / None=3（对齐
+	// Aaalice_NAI_Launcher 的 UcPresets.toApiValue）。这里断言 3（无预设）。
+	// 历史上这行写的是 4 —— 那是 NAI 早期 UI 的显示顺序（Heavy=4/Light=5），
+	// 属于错误值；实现侧一直是 3，长期被同文件的编译错误掩盖才没暴露。
+	if req.Parameters.UCPreset != 3 {
 		t.Fatalf("ucPreset = %d, want legacy default", req.Parameters.UCPreset)
 	}
 	if req.Parameters.CfgRescale != 0 {
@@ -218,10 +222,12 @@ func TestConvertToNovelAIRequestV4CharacterPrompts(t *testing.T) {
 	if got := req.Parameters.V4Prompt.Caption.BaseCaption; got != "two girls in a garden" {
 		t.Fatalf("v4 base caption = %q, want main prompt", got)
 	}
-	if !req.Parameters.V4Prompt.UseCoords || !req.Parameters.V4NegativePrompt.UseCoords {
+	// 只断言 v4_prompt：v4_negative_prompt 结构体故意不带 use_coords / use_order
+	// （参考实现只在正面结构发这两个字段，负面多发会让上游按不同分支解析负面词）。
+	if !req.Parameters.V4Prompt.UseCoords {
 		t.Fatal("manual role positioning should enable use_coords")
 	}
-	if !req.Parameters.V4Prompt.UseOrder || !req.Parameters.V4NegativePrompt.UseOrder {
+	if !req.Parameters.V4Prompt.UseOrder {
 		t.Fatal("role prompts should keep use_order enabled")
 	}
 	if got := len(req.Parameters.V4Prompt.Caption.CharCaptions); got != 2 {
@@ -615,3 +621,99 @@ func TestConvertToNovelAIRequestV4ForcesKarrasNoiseSchedule(t *testing.T) {
 		t.Fatalf("noise_schedule = %q, want karras for V4 model", req.Parameters.NoiseSchedule)
 	}
 }
+
+// 连续坐标必须原样直传，不能被 mapNovelAIGridCoord 那套 0.1/0.3/0.5/0.7 量化掉，
+// 否则位置画布的「拖到哪就是哪」会退化成吸附跳格。
+func TestConvertToNovelAIRequestCharacterCenterKeepsContinuousCoords(t *testing.T) {
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Prompt:             "two girls in a garden",
+		NegativePrompt:     "bad hands",
+		Size:               "1024x1024",
+		NovelAIEnabled:     true,
+		NovelAIModel:       "nai-diffusion-4-full",
+		DivideRoles:        true,
+		UseAutoPositioning: false,
+		CharacterPrompts: []novelAICharacterPromptInput{
+			{
+				DisplayName:             "Alice",
+				CharacterPrompt:         "alice, red hair",
+				CharacterNegativePrompt: "blue hair",
+				Center:                  &v4Position{X: 0.37, Y: 0.62},
+			},
+		},
+	})
+
+	if req.Parameters.V4Prompt == nil {
+		t.Fatal("expected V4 prompt structure")
+	}
+	centers := req.Parameters.V4Prompt.Caption.CharCaptions[0].Centers
+	if len(centers) != 1 || centers[0].X != 0.37 || centers[0].Y != 0.62 {
+		t.Fatalf("center = %#v, want continuous 0.37/0.62 without quantization", centers)
+	}
+	// 负面 char_caption 必须共用同一坐标，否则正负约束会落在画面不同位置。
+	negCenters := req.Parameters.V4NegativePrompt.Caption.CharCaptions[0].Centers
+	if len(negCenters) != 1 || negCenters[0].X != 0.37 || negCenters[0].Y != 0.62 {
+		t.Fatalf("negative center = %#v, want same continuous coords", negCenters)
+	}
+	if req.Parameters.CharacterPrompts[0].Center == nil || req.Parameters.CharacterPrompts[0].Center.X != 0.37 {
+		t.Fatalf("compat center = %#v, want continuous coords", req.Parameters.CharacterPrompts[0].Center)
+	}
+}
+
+// center 与 coords 同时存在时 center 优先：工作台会同时带两套坐标（coords 供画布兼容），
+// 若优先级取反，拖拽结果会被网格量化悄悄覆盖。
+func TestConvertToNovelAIRequestCharacterCenterOverridesCoords(t *testing.T) {
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Prompt:             "two girls in a garden",
+		Size:               "1024x1024",
+		NovelAIEnabled:     true,
+		NovelAIModel:       "nai-diffusion-4-full",
+		DivideRoles:        true,
+		UseAutoPositioning: false,
+		CharacterPrompts: []novelAICharacterPromptInput{
+			{
+				DisplayName:     "Alice",
+				CharacterPrompt: "alice",
+				// coords{2,4} 会被量化成 0.3/0.7，center 必须把它盖掉。
+				Coords: &novelAIGridCoords{X: 2, Y: 4},
+				Center: &v4Position{X: 0.9, Y: 0.1},
+			},
+		},
+	})
+
+	centers := req.Parameters.V4Prompt.Caption.CharCaptions[0].Centers
+	if len(centers) != 1 || centers[0].X != 0.9 || centers[0].Y != 0.1 {
+		t.Fatalf("center = %#v, want center to win over coords", centers)
+	}
+}
+
+// 越界坐标必须钳到 0-1：脏数据（或未来 UI 的换算 bug）不能让上游收到 1.5 这种非法值。
+func TestClampNovelAICharacterCenterClampsOutOfRange(t *testing.T) {
+	center := clampNovelAICharacterCenter(&v4Position{X: 1.5, Y: -0.2})
+	if center == nil {
+		t.Fatal("expected center")
+	}
+	if center.X != 1.0 || center.Y != 0.0 {
+		t.Fatalf("center = %#v, want clamped 1.0/0.0", center)
+	}
+}
+
+func TestConvertToNovelAIRequestCharacterCenterClampedInRequest(t *testing.T) {
+	req := mustConvertToNovelAIRequest(t, openAIImageRequest{
+		Prompt:             "two girls in a garden",
+		Size:               "1024x1024",
+		NovelAIEnabled:     true,
+		NovelAIModel:       "nai-diffusion-4-full",
+		DivideRoles:        true,
+		UseAutoPositioning: false,
+		CharacterPrompts: []novelAICharacterPromptInput{
+			{DisplayName: "Alice", CharacterPrompt: "alice", Center: &v4Position{X: 1.5, Y: -0.2}},
+		},
+	})
+
+	centers := req.Parameters.V4Prompt.Caption.CharCaptions[0].Centers
+	if len(centers) != 1 || centers[0].X != 1.0 || centers[0].Y != 0.0 {
+		t.Fatalf("center = %#v, want clamped 1.0/0.0", centers)
+	}
+}
+

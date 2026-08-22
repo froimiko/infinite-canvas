@@ -127,11 +127,21 @@ type v4Position struct {
 	Y float64 `json:"y"`
 }
 
+// novelAICharacterPromptInput 是前端上报的单个角色。
+//
+// 坐标有两套字段，优先级固定为 Center > Coords：
+//   - Center 是连续坐标 0-1，与参考实现 nai_image_request_builder.dart:194-206 一致，
+//     位置画布拖到哪就发哪，不做任何量化（量化会让「松手即生效」变成吸附跳格）；
+//   - Coords 是历史的 5x5 网格整数 0-4，画布 NovelAI 节点的角色面板仍在用，
+//     经 mapNovelAIGridCoord 量化成 0.0/0.1/0.3/0.5/0.7（注意最大只到 0.7）。
+//
+// 两套并存而不是替换：换掉 Coords 语义会让存量画布节点的角色位置整体漂移。
 type novelAICharacterPromptInput struct {
 	DisplayName             string             `json:"displayName"`
 	CharacterPrompt         string             `json:"characterPrompt"`
 	CharacterNegativePrompt string             `json:"characterNegativePrompt"`
 	Coords                  *novelAIGridCoords `json:"coords"`
+	Center                  *v4Position        `json:"center"`
 }
 
 type novelAIGridCoords struct {
@@ -630,7 +640,12 @@ func buildNovelAICharacterPrompts(prompts []novelAICharacterPromptInput, useDefa
 			continue
 		}
 
-		center := mapNovelAICharacterPromptCoords(prompt.Coords)
+		// 坐标优先级 Center > Coords：新的位置画布走连续坐标直传，
+		// 老的画布节点仍只带网格坐标，两条链路各取所需。
+		center := clampNovelAICharacterCenter(prompt.Center)
+		if center == nil {
+			center = mapNovelAICharacterPromptCoords(prompt.Coords)
+		}
 		if center == nil && useDefaultCenter {
 			center = &v4Position{X: 0.5, Y: 0.5}
 		}
@@ -655,6 +670,34 @@ func buildNovelAICharacterPrompts(prompts []novelAICharacterPromptInput, useDefa
 	}
 
 	return charCaptions, charNegCaptions, compatPrompts
+}
+
+// clampNovelAICharacterCenter 钳制连续坐标到 0.0-1.0。
+//
+// 与 mapNovelAIGridCoord 的区别：这里**不做任何量化**，拖到 0.37 就发 0.37，
+// 与参考实现一致。NaN/Inf 直接丢弃（返回 nil 走后续回退），
+// 否则序列化出的 JSON 会带非法数值让上游直接拒绝整个请求。
+func clampNovelAICharacterCenter(center *v4Position) *v4Position {
+	if center == nil {
+		return nil
+	}
+	if math.IsNaN(center.X) || math.IsNaN(center.Y) || math.IsInf(center.X, 0) || math.IsInf(center.Y, 0) {
+		return nil
+	}
+	return &v4Position{
+		X: clampNovelAIUnitCoord(center.X),
+		Y: clampNovelAIUnitCoord(center.Y),
+	}
+}
+
+func clampNovelAIUnitCoord(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 func mapNovelAICharacterPromptCoords(coords *novelAIGridCoords) *v4Position {

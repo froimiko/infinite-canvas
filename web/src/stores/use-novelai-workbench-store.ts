@@ -7,7 +7,8 @@ import { DEFAULT_NOVELAI_SETTINGS } from "@/components/novelai/novelai-constants
 import { DEFAULT_NOVELAI_QUALITY_PRESET, DEFAULT_NOVELAI_UC_PRESET, normalizeNovelAIQualityPreset, normalizeNovelAIUcPreset, type NovelAIQualityPreset, type NovelAIUcPreset } from "@/components/novelai/novelai-presets";
 import { DEFAULT_NOVELAI_SIZE } from "@/components/novelai/novelai-resolutions";
 import type { PromptBlockToken } from "@/components/prompt-block-editor/prompt-block-types";
-import type { NovelAINoiseSchedule } from "@/types/image";
+import { normalizeNovelAICharacterPrompts } from "@/lib/novelai-config";
+import type { NovelAICharacterPrompt, NovelAINoiseSchedule } from "@/types/image";
 
 /**
  * 生图工作台「novelai生图」标签页的私有状态。
@@ -47,6 +48,22 @@ export type NovelAIWorkbenchState = {
     naSeedLocked: boolean;
     naQualityToggle: boolean;
     naAddOriginalImage: boolean;
+
+    /**
+     * 多角色列表（NAI V4+ 的分离出图）。
+     *
+     * 位置用 NovelAICharacterPrompt.center（连续 0-1），不是画布那套 0-4 网格。
+     * 这里只存数据；`selectedCharacterId`、位置弹窗开关这类 UI 瞬态**不要**加进来 ——
+     * 它们每次拖拽/点选都会变，进了 persist 就是高频写盘，而且刷新后恢复「弹窗开着」很怪。
+     */
+    characters: NovelAICharacterPrompt[];
+    /**
+     * 位置模式：true = 「AI 选择」（由 NAI 自行构图），false = 「自定义」（用 center 坐标）。
+     *
+     * 对应参考项目 CharacterPromptConfig.globalAiChoice，默认同样是 true。
+     * 注意它是全局开关，会盖掉所有角色的位置；切回自定义时 center 数据原样保留。
+     */
+    charactersAiChoice: boolean;
 };
 
 export type NovelAIWorkbenchStore = NovelAIWorkbenchState & {
@@ -79,6 +96,9 @@ const DEFAULT_STATE: NovelAIWorkbenchState = {
     naSeedLocked: false,
     naQualityToggle: DEFAULT_NOVELAI_SETTINGS.novelAIQualityToggle,
     naAddOriginalImage: DEFAULT_NOVELAI_SETTINGS.novelAIAddOriginalImage,
+
+    characters: [],
+    charactersAiChoice: true,
 };
 
 export const useNovelAIWorkbenchStore = create<NovelAIWorkbenchStore>()(
@@ -120,5 +140,10 @@ function normalizeWorkbenchState(state: NovelAIWorkbenchStore): NovelAIWorkbench
         count: Math.max(1, Math.min(15, Math.floor(Number(state.count) || 1))),
         naQualityToggle: state.naQualityToggle === true,
         naAddOriginalImage: state.naAddOriginalImage === true,
+        // 复用 normalizeNovelAICharacterPrompts：id/gender/enabled/center 的兜底规则
+        // 与请求链路共用一份，避免存档里的角色和实际发出去的对不上。
+        characters: normalizeNovelAICharacterPrompts(state.characters),
+        // 默认「AI 选择」，所以用 !== false（老存档没这个字段时要读成 true）。
+        charactersAiChoice: state.charactersAiChoice !== false,
     };
 }

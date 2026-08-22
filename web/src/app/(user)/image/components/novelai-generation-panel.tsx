@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "antd";
 import { Sparkles } from "lucide-react";
 
@@ -14,6 +15,8 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeMetadata } from "@/app/(user)/canvas/types";
 import type { ReferenceImage } from "@/types/image";
 
+import { NovelAICharacterPositionDialog } from "./novelai-character-position-dialog";
+import { NovelAICharacterSection } from "./novelai-character-section";
 import { ReferenceImageField } from "./reference-image-field";
 import "./novelai-generation-panel.css";
 
@@ -48,22 +51,12 @@ type NovelAIGenerationPanelProps = {
  *     换字段必须重建组件，否则会看到上一个字段的内容。
  *  3. 参数不走全局 config，全部存在 useNovelAIWorkbenchStore（尺寸/张数与通用生图隔离）。
  */
-export function NovelAIGenerationPanel({
-    activeField,
-    onActiveFieldChange,
-    references,
-    onReferencesChange,
-    onPasteReferences,
-    onUploadReferences,
-    config,
-    openConfigDialog,
-    running,
-    canGenerate,
-    onGenerate,
-}: NovelAIGenerationPanelProps) {
+export function NovelAIGenerationPanel({ activeField, onActiveFieldChange, references, onReferencesChange, onPasteReferences, onUploadReferences, config, openConfigDialog, running, canGenerate, onGenerate }: NovelAIGenerationPanelProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const state = useNovelAIWorkbenchStore();
     const patch = useNovelAIWorkbenchStore((store) => store.patch);
+    const [positionDialogOpen, setPositionDialogOpen] = useState(false);
+    const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
 
     const isPositive = activeField === "positive";
     const model = state.model || config.imageModel || config.model;
@@ -104,11 +97,7 @@ export function NovelAIGenerationPanel({
                     key={activeField}
                     open
                     inline
-                    target={
-                        isPositive
-                            ? { title: "正面提示词", value: state.positivePrompt, tokens: state.positiveTokens }
-                            : { title: "负面提示词", value: state.negativePrompt, tokens: state.negativeTokens }
-                    }
+                    target={isPositive ? { title: "正面提示词", value: state.positivePrompt, tokens: state.positiveTokens } : { title: "负面提示词", value: state.negativePrompt, tokens: state.negativeTokens }}
                     preset={
                         isPositive
                             ? {
@@ -131,33 +120,20 @@ export function NovelAIGenerationPanel({
                             tag候选
                         </label>
                     }
-                    onChange={(value, tokens) =>
-                        isPositive ? patch({ positivePrompt: value, positiveTokens: tokens }) : patch({ negativePrompt: value, negativeTokens: tokens })
-                    }
+                    onChange={(value, tokens) => (isPositive ? patch({ positivePrompt: value, positiveTokens: tokens }) : patch({ negativePrompt: value, negativeTokens: tokens }))}
                     // inline 模式没有「应用/取消」，这两个回调用不到，给空实现满足必填签名。
                     onSubmit={() => {}}
                     onClose={() => {}}
                 />
 
-                <ReferenceImageField
-                    references={references}
-                    onReferencesChange={onReferencesChange}
-                    onPaste={onPasteReferences}
-                    onUpload={onUploadReferences}
-                    hint={references.length ? "已启用图生图（img2img）" : "留空则为文生图"}
-                />
+                <ReferenceImageField references={references} onReferencesChange={onReferencesChange} onPaste={onPasteReferences} onUpload={onUploadReferences} hint={references.length ? "已启用图生图（img2img）" : "留空则为文生图"} />
 
                 <div>
                     <div className="mb-2 text-base font-semibold">模型</div>
-                    <ModelPicker
-                        config={config}
-                        value={model}
-                        capability="image"
-                        fullWidth
-                        onChange={(value) => patch({ model: value })}
-                        onMissingConfig={() => openConfigDialog(false)}
-                    />
+                    <ModelPicker config={config} value={model} capability="image" fullWidth onChange={(value) => patch({ model: value })} onMissingConfig={() => openConfigDialog(false)} />
                 </div>
+
+                <NovelAICharacterSection model={model} theme={theme} selectedCharacterId={selectedCharacterId} onSelectedCharacterIdChange={setSelectedCharacterId} onOpenPositionDialog={() => setPositionDialogOpen(true)} />
 
                 <div className="nai-params">
                     <NovelAIParamsPanel
@@ -191,6 +167,7 @@ export function NovelAIGenerationPanel({
                     开始生成
                 </Button>
             </div>
+            <NovelAICharacterPositionDialog open={positionDialogOpen} theme={theme} selectedCharacterId={selectedCharacterId} onSelectedCharacterIdChange={setSelectedCharacterId} onClose={() => setPositionDialogOpen(false)} />
         </>
     );
 }
