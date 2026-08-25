@@ -845,6 +845,26 @@ func proxyNovelAIImageRequest(w http.ResponseWriter, r *http.Request, body []byt
 	}
 
 	totalCredits := credits * requestCount
+
+	// 0.2 NAI V5 充能条配额守卫。
+	//
+	// ★ 位置有讲究，别挪：
+	//   - 必须在 ConsumeUserCredits **之前** —— 拦下来的请求不该扣算力点。
+	//   - 必须在 wantsNovelAISSE 分支**之前** —— SSE 一旦发出 200 响应头就再也
+	//     改不了状态码，那时只能走 event: error，前端拿不到干净的 HTTP 错误。
+	//
+	// 这里用 sampleReq 的**已解析模型 ID** 与**实际出图尺寸**：前者保证 V4.5 不会
+	// 被误判成 V5，后者保证大图按面积扣多份配额。非 V5 模型在守卫内部第一步就短路，
+	// 一次上游订阅查询都不会发。
+	if err := ensureNovelAIV5Quota(
+		r.Context(), channel, sampleReq.Model,
+		sampleReq.Parameters.Width, sampleReq.Parameters.Height, requestCount,
+	); err != nil {
+		log.Printf("NovelAI V5 quota guard rejected: model=%s count=%d err=%v", sampleReq.Model, requestCount, err)
+		Fail(w, err.Error())
+		return
+	}
+
 	if err := service.ConsumeUserCredits(user.ID, sampleReq.Model, totalCredits, "/images/generations"); err != nil {
 		FailError(w, err)
 		return
@@ -966,6 +986,22 @@ func requestNovelAISingleImageBatch(
 					break
 				}
 
+				// V5 配额批内复查。
+				//
+				// 为什么开头查过还要逐张查：批量 10 张在入口一次性放行后，可能在第 7 张
+				// 时才跨过临界点（本批自己在消耗，别的用户也在消耗同一个 Token 的配额）。
+				// 不复查就会把剩下几张白扣成 Anlas —— 正是本特性要防的事。
+				//
+				// 这里通常只读缓存（TTL 内不发请求），代价极低；一旦不通过就中止本批，
+				// 已出的图照常返回，未出的部分走既有「部分失败 → 部分退款」路径。
+				if err := ensureNovelAIV5Quota(ctx, channel, naiReq.Model, naiReq.Parameters.Width, naiReq.Parameters.Height, 1); err != nil {
+					log.Printf("NovelAI batch stopped by V5 quota guard: slot=%d/%d err=%v", index+1, count, err)
+					if firstErr == nil {
+						firstErr = err
+					}
+					break
+				}
+
 				data, _, err := doNovelAIUpstreamRequest(ctx, channel, naiReq)
 				if err != nil {
 					// 单张失败不中断整批：剩下的继续出，末尾按实际成功张数部分退款。
@@ -976,6 +1012,8 @@ func requestNovelAISingleImageBatch(
 				} else {
 					ordered[index] = data
 					succeededCount++
+					// 出图成功才扣配额：失败/取消的请求上游不会计入配额池。
+					consumeNovelAIV5Quota(channel, naiReq.Model, naiReq.Parameters.Width, naiReq.Parameters.Height, 1)
 				}
 
 				// 无论成败都要递减：这张已经不再占用后面人的等待时间了。
@@ -1169,6 +1207,8 @@ func requestNovelAIImageData(ctx context.Context, channel model.ModelChannel, na
 			"NovelAI request done: model=%s wait=%.1fs upstream=%.1fs imagesAhead=%d images=%d",
 			naiReq.Model, waitSeconds, upstreamDuration.Seconds(), imagesAhead, len(data),
 		)
+		// 出图成功才扣 V5 配额预测；非 V5 模型在函数内部短路，不受影响。
+		consumeNovelAIV5Quota(channel, naiReq.Model, naiReq.Parameters.Width, naiReq.Parameters.Height, 1)
 		return data, nil
 	})
 }

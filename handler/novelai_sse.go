@@ -241,6 +241,8 @@ func streamNovelAIImageRequest(w http.ResponseWriter, r *http.Request, p streamN
 					"NovelAI SSE request done: model=%s wait=%.1fs upstream=%.1fs images=%d",
 					p.SampleReq.Model, time.Since(enqueuedAt).Seconds()-upstream.Seconds(), upstream.Seconds(), len(images),
 				)
+				// 出图成功才扣 V5 配额预测；非 V5 模型在函数内部短路，不受影响。
+				consumeNovelAIV5Quota(p.Channel, p.SampleReq.Model, p.SampleReq.Parameters.Width, p.SampleReq.Parameters.Height, 1)
 				return images, nil
 			})
 	}

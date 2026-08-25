@@ -177,6 +177,25 @@ export type AdminModelChannel = {
         maxUserQueuedImages?: number;
         /** 全队列绝对上限（张），仅防内存失控，正常不会触发。 */
         maxQueuedImages?: number;
+
+        // ── NAI V5 充能条配额守卫 ──────────────────────────────
+        // 官方只对 V5 两个模型（nai-diffusion-5-full / nai-diffusion-5-curated）
+        // 把 Opus 免费额度改成了随时间回充的配额池；V4.5 / V4 / V3 仍是无限免费小图，
+        // 不受这几项影响。
+
+        /** 是否启用 V5 配额守卫：出图前查充能条余量，不足就拦截，避免误消耗 Anlas。 */
+        v5QuotaGuardEnabled?: boolean;
+        /**
+         * 始终保留不花的张数（默认 1）。
+         *
+         * 上游的「配额已透支」是事后信号 —— 它变真时最后一张已经花掉了。
+         * 多留一张余量，耗尽前的最后一张就永远不会被误消耗。
+         */
+        v5QuotaReserveImages?: number;
+        /** 查询配额失败时是否放行。false（默认）= 拦截保点数；true = 照常出图保可用性。 */
+        v5QuotaAllowOnLookupFailure?: boolean;
+        /** 配额缓存时长（秒，默认 30），避免每张图都去查一次上游订阅接口。 */
+        v5QuotaCacheSeconds?: number;
     };
 };
 

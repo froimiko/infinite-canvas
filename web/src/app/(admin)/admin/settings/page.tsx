@@ -81,6 +81,12 @@ const emptyChannel: AdminModelChannel = {
         maxUserQueuedImages: 20,
         maxQueuedImages: 500,
         disableImg2Img: true,
+        // V5 配额守卫默认开启：官方给 V5 加了充能条，不拦就会静默扣 Anlas。
+        // 保留 1 张是刻意的 —— 上游「已透支」是事后信号，留一张才不会把最后一张误花掉。
+        v5QuotaGuardEnabled: true,
+        v5QuotaReserveImages: 1,
+        v5QuotaAllowOnLookupFailure: false,
+        v5QuotaCacheSeconds: 30,
     },
 };
 
@@ -1084,8 +1090,8 @@ export default function AdminSettingsPage() {
                                                         </Row>
                                                         <div className="mt-3 rounded bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
                                                             <div className="mb-1 font-medium">排队设置</div>
-                                                            NovelAI 免费生图<strong>不支持并发</strong>，同一 Token 下所有用户串行排队，这是预期行为，不是故障。
-                                                            请求会通过 SSE 流式返回排队进度，因此不会触发 Cloudflare 524；队列长度不设上限，用户可自行取消。
+                                                            NovelAI 免费生图<strong>不支持并发</strong>，同一 Token 下所有用户串行排队，这是预期行为，不是故障。 请求会通过 SSE 流式返回排队进度，因此不会触发 Cloudflare
+                                                            524；队列长度不设上限，用户可自行取消。
                                                             <br />
                                                             想提升吞吐只能增加不同 Token 的渠道（每个 Token 是一条独立队列，系统会按权重自动分流）。
                                                         </div>
@@ -1103,6 +1109,58 @@ export default function AdminSettingsPage() {
                                                             <Col span={8}>
                                                                 <Form.Item name={["freeGenerationLock", "maxQueuedImages"]} label="队列绝对上限(张)" tooltip="仅用于防止内存无限增长，正常流量不会触发">
                                                                     <InputNumber min={10} max={5000} className="w-full" />
+                                                                </Form.Item>
+                                                            </Col>
+                                                        </Row>
+
+                                                        <div className="mt-3 rounded-md border border-sky-300 bg-sky-50 p-3 dark:border-sky-700 dark:bg-sky-950/40">
+                                                            <div className="mb-1 text-sm font-medium text-sky-900 dark:text-sky-200">NAI V5 充能条配额</div>
+                                                            <div className="text-xs leading-5 text-sky-800 dark:text-sky-300">
+                                                                官方<strong>仅对 V5 两个模型</strong>（NAI Diffusion V5 Full / Curated）把 Opus 的「无限免费小图」改成了<strong>随时间回充的充能条</strong>，配额透支后按正常价扣 Anlas。
+                                                                <br />
+                                                                V4.5 / V4 / V3 <strong>仍然是无限免费小图</strong>，不受这里的设置影响，也不会因此多一次上游查询。
+                                                                <br />
+                                                                开启后，后端会在出图前查一次剩余配额，不足就直接拦截，避免误消耗点数。（当前版本不在前端显示剩余量，仅做拦截）
+                                                            </div>
+                                                        </div>
+                                                        <Row gutter={12} className="mt-2">
+                                                            <Col span={24}>
+                                                                <Form.Item name={["freeGenerationLock", "v5QuotaGuardEnabled"]} valuePropName="checked" noStyle>
+                                                                    <Checkbox>启用 V5 配额守卫（配额不足时拦截出图，避免消耗 Anlas）</Checkbox>
+                                                                </Form.Item>
+                                                            </Col>
+                                                        </Row>
+                                                        <Row gutter={12} className="mt-2">
+                                                            <Col span={8}>
+                                                                <Form.Item
+                                                                    name={["freeGenerationLock", "v5QuotaReserveImages"]}
+                                                                    label="保留张数"
+                                                                    tooltip="始终留着不花的张数。上游的「配额已透支」是事后信号——它变真时最后一张已经花掉了，所以多留一张才能保证耗尽前的最后一张不被误消耗。填 0 表示允许用到见底。"
+                                                                >
+                                                                    <InputNumber min={0} max={50} className="w-full" />
+                                                                </Form.Item>
+                                                            </Col>
+                                                            <Col span={8}>
+                                                                <Form.Item
+                                                                    name={["freeGenerationLock", "v5QuotaCacheSeconds"]}
+                                                                    label="配额缓存(秒)"
+                                                                    tooltip="避免每张图都去查一次上游订阅接口。缓存期内系统会按已出图张数在本地递减预测值，因此不会因为缓存而放行超额请求。"
+                                                                >
+                                                                    <InputNumber min={1} max={600} className="w-full" />
+                                                                </Form.Item>
+                                                            </Col>
+                                                            <Col span={8}>
+                                                                <Form.Item
+                                                                    name={["freeGenerationLock", "v5QuotaAllowOnLookupFailure"]}
+                                                                    label="查询失败时"
+                                                                    tooltip="查不到配额（超时 / 鉴权失败 / 上游 5xx）时怎么办。默认拦截以保点数；若更看重可用性可改为放行，但存在误消耗 Anlas 的风险。"
+                                                                >
+                                                                    <Select
+                                                                        options={[
+                                                                            { value: false, label: "拦截（推荐，保点数）" },
+                                                                            { value: true, label: "放行（保可用性）" },
+                                                                        ]}
+                                                                    />
                                                                 </Form.Item>
                                                             </Col>
                                                         </Row>
