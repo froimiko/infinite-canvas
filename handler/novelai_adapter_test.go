@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"sync/atomic"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -488,7 +488,11 @@ func TestAlignTo64RoundsToNearest(t *testing.T) {
 		{32, 64},
 		{64, 64},
 		{65, 64},
-		{96, 64},
+		// 96 与 1056 都恰好落在两个 64 倍数的正中点。实现统一「四舍五入向上」
+		// （((v+32)/64)*64），符合 alignTo64 注释声明的意图：宁可放大也不静默缩水。
+		// 此处原为 {96, 64}（向下），与同表 {1056, 1088}（向上）自相矛盾，
+		// 属于用例期望值写错 —— 实现侧一直是向上取整。
+		{96, 128},
 		{100, 128},
 		{500, 512},
 		{1000, 1024},
@@ -716,4 +720,3 @@ func TestConvertToNovelAIRequestCharacterCenterClampedInRequest(t *testing.T) {
 		t.Fatalf("center = %#v, want clamped 1.0/0.0", centers)
 	}
 }
-

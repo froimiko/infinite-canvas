@@ -19,7 +19,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/basketikun/infinite-canvas/model"
@@ -39,7 +38,9 @@ func novelAIDebugEnabled() bool {
 	}
 }
 
-var novelAIFreeGenerationLocks sync.Map // map[string]chan struct{}，key 为 baseURL+APIKey 的 SHA-256，避免泄露 Token。
+// 渠道级串行队列已迁移到 novelai_queue.go（novelAIQueues）。
+// 那里在原有「可取消 channel 锁」之外，额外维护 FIFO 票号与剩余张数，
+// 使排队位置和预估等待时间可查询；key 仍是 novelAIFreeGenerationLockKey。
 
 // NovelAI API 请求结构（V4+ 结构化规范，V5 沿用 v4_prompt 字段）
 type novelAIRequest struct {
@@ -75,20 +76,20 @@ type novelAIParameters struct {
 	CharacterPrompts []novelAICharacterPromptCompat `json:"characterPrompts,omitempty"`
 
 	// 固定参数（保持兼容性）
-	NoiseSchedule                    string  `json:"noise_schedule"`
-	SM                               *bool   `json:"sm,omitempty"`
-	SMDyn                            *bool   `json:"sm_dyn,omitempty"`
-	DynamicThresholding              bool    `json:"dynamic_thresholding"`
-	ControlnetStrength               float64 `json:"controlnet_strength"`
-	Legacy                           bool    `json:"legacy"`
-	AddOriginalImage                 bool    `json:"add_original_image"`
-	DeliberateEulerAncestralBug      bool    `json:"deliberate_euler_ancestral_bug"`
-	PreferBrownian                   bool    `json:"prefer_brownian"`
-	AutoSmea                           bool  `json:"autoSmea"`
-	NormalizeReferenceStrengthMultiple bool  `json:"normalize_reference_strength_multiple"`
-	LegacyV3Extend                     *bool `json:"legacy_v3_extend,omitempty"` // V4 专用
-	UseCoords                          *bool `json:"use_coords,omitempty"`       // V4 专用：顶层副本
-	UC                                 string `json:"uc,omitempty"`              // V3 专用：负面提示词冗余字段
+	NoiseSchedule                      string  `json:"noise_schedule"`
+	SM                                 *bool   `json:"sm,omitempty"`
+	SMDyn                              *bool   `json:"sm_dyn,omitempty"`
+	DynamicThresholding                bool    `json:"dynamic_thresholding"`
+	ControlnetStrength                 float64 `json:"controlnet_strength"`
+	Legacy                             bool    `json:"legacy"`
+	AddOriginalImage                   bool    `json:"add_original_image"`
+	DeliberateEulerAncestralBug        bool    `json:"deliberate_euler_ancestral_bug"`
+	PreferBrownian                     bool    `json:"prefer_brownian"`
+	AutoSmea                           bool    `json:"autoSmea"`
+	NormalizeReferenceStrengthMultiple bool    `json:"normalize_reference_strength_multiple"`
+	LegacyV3Extend                     *bool   `json:"legacy_v3_extend,omitempty"` // V4 专用
+	UseCoords                          *bool   `json:"use_coords,omitempty"`       // V4 专用：顶层副本
+	UC                                 string  `json:"uc,omitempty"`               // V3 专用：负面提示词冗余字段
 
 	// img2img 参数（Phase 3）
 	Image    string  `json:"image,omitempty"`
@@ -165,24 +166,24 @@ type openAIImageRequest struct {
 	Quality        string `json:"quality"`
 	ResponseFormat string `json:"response_format"`
 
-	NovelAIEnabled       bool                          `json:"novelai_enabled"`
-	QualityToggle        *bool                         `json:"quality_toggle"`
-	AddOriginalImage     *bool                         `json:"add_original_image"`
-	NovelAIModel         string                        `json:"novelai_model"`
-	Sampler              string                        `json:"sampler"`
-	Steps                *int                          `json:"steps"`
-	CfgScale             *float64                      `json:"cfg_scale"`
-	Seed                 *int64                        `json:"seed"`
-	UCPreset             string                        `json:"uc_preset"`
-	CfgRescale           *float64                      `json:"cfg_rescale"`
-	NoiseSchedule        string                        `json:"noise_schedule"`
-	SM                   *bool                         `json:"sm"`
-	SMDyn                *bool                         `json:"sm_dyn"`
-	DynamicThresholding  *bool                         `json:"dynamic_thresholding"`
-	VarietyPlus          *bool                         `json:"variety_plus"`
-	DivideRoles          bool                          `json:"divide_roles"`
-	UseAutoPositioning   bool                          `json:"use_auto_positioning"`
-	CharacterPrompts     []novelAICharacterPromptInput `json:"character_prompts"`
+	NovelAIEnabled      bool                          `json:"novelai_enabled"`
+	QualityToggle       *bool                         `json:"quality_toggle"`
+	AddOriginalImage    *bool                         `json:"add_original_image"`
+	NovelAIModel        string                        `json:"novelai_model"`
+	Sampler             string                        `json:"sampler"`
+	Steps               *int                          `json:"steps"`
+	CfgScale            *float64                      `json:"cfg_scale"`
+	Seed                *int64                        `json:"seed"`
+	UCPreset            string                        `json:"uc_preset"`
+	CfgRescale          *float64                      `json:"cfg_rescale"`
+	NoiseSchedule       string                        `json:"noise_schedule"`
+	SM                  *bool                         `json:"sm"`
+	SMDyn               *bool                         `json:"sm_dyn"`
+	DynamicThresholding *bool                         `json:"dynamic_thresholding"`
+	VarietyPlus         *bool                         `json:"variety_plus"`
+	DivideRoles         bool                          `json:"divide_roles"`
+	UseAutoPositioning  bool                          `json:"use_auto_positioning"`
+	CharacterPrompts    []novelAICharacterPromptInput `json:"character_prompts"`
 }
 
 func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
@@ -849,11 +850,30 @@ func proxyNovelAIImageRequest(w http.ResponseWriter, r *http.Request, body []byt
 		return
 	}
 
+	// 2. 走 SSE 还是普通 JSON。
+	//
+	// 到这里为止都还没写响应头，所以上面任何失败都能正常返回 HTTP 错误码。
+	// SSE 分支从这一刻开始会立即发出 200 响应头（详见 streamNovelAIImageRequest），
+	// 之后就无法再改状态码了。
+	if wantsNovelAISSE(r) {
+		streamNovelAIImageRequest(w, r, streamNovelAIParams{
+			OpenAIReq:           openAIReq,
+			SampleReq:           sampleReq,
+			Channel:             channel,
+			User:                user,
+			Credits:             credits,
+			TotalCredits:        totalCredits,
+			RequestCount:        requestCount,
+			ForceSingleRequests: forceSingleRequests,
+		})
+		return
+	}
+
 	var data []map[string]interface{}
 	var requestErr error
 	succeededCount := requestCount
 	if forceSingleRequests && requestCount > 1 {
-		data, succeededCount, requestErr = requestNovelAISingleImageBatch(r.Context(), openAIReq, requestCount, channel)
+		data, succeededCount, requestErr = requestNovelAISingleImageBatch(r.Context(), openAIReq, requestCount, channel, user.ID, nil, nil)
 	} else {
 		data, requestErr = requestNovelAIImageData(r.Context(), channel, sampleReq)
 	}
@@ -884,58 +904,103 @@ func proxyNovelAIImageRequest(w http.ResponseWriter, r *http.Request, body []byt
 	_, _ = w.Write(jsonResponse)
 }
 
-type novelAIImageBatchResult struct {
-	Index int
-	Data  []map[string]interface{}
-	Err   error
-}
-
-func requestNovelAISingleImageBatch(ctx context.Context, openAIReq openAIImageRequest, count int, channel model.ModelChannel) ([]map[string]interface{}, int, error) {
-	resultCh := make(chan novelAIImageBatchResult, count)
-	for index := 0; index < count; index++ {
-		go func(index int) {
-			slotReq := openAIReq
-			slotReq.N = 1
-			body, err := json.Marshal(slotReq)
-			if err != nil {
-				resultCh <- novelAIImageBatchResult{Index: index, Err: err}
-				return
-			}
-			naiReq, err := convertToNovelAIRequest(body)
-			if err != nil {
-				resultCh <- novelAIImageBatchResult{Index: index, Err: err}
-				return
-			}
-			data, err := requestNovelAIImageData(ctx, channel, naiReq)
-			resultCh <- novelAIImageBatchResult{Index: index, Data: data, Err: err}
-		}(index)
+// requestNovelAISingleImageBatch 在**一个**队列名额内串行出多张图。
+//
+// 历史实现开 count 个 goroutine、每个各自去抢同一把串行锁：在 NovelAI 免费生图
+// 「不支持并发」的前提下这并不会更快（实际仍逐张出图），却有两个坏处：
+//  1. 往队列里插了 count 个分散占位，别人看到的「前方还有几张」完全失真；
+//  2. 单个用户点 10 张就能独占队列，把后面所有人拖到 Cloudflare 100s 之外。
+//
+// 现在整批只占一个名额，内部串行出图，并在每张完成后 markProgress 递减剩余张数，
+// 这样后面排队的人看到的前方张数会实时下降。
+//
+// onImageDone 可为 nil；非 nil 时每张出图完成后回调 (current, total)，供 SSE 推进度。
+func requestNovelAISingleImageBatch(
+	ctx context.Context,
+	openAIReq openAIImageRequest,
+	count int,
+	channel model.ModelChannel,
+	userID string,
+	onQueueUpdate func(imagesAhead int, estimatedSeconds int),
+	onImageDone func(current, total int),
+) ([]map[string]interface{}, int, error) {
+	if count < 1 {
+		count = 1
 	}
 
-	ordered := make([][]map[string]interface{}, count)
-	var firstErr error
+	// 先把每张的请求体转换好：转换失败属于参数问题，没必要占着队列名额再报错。
+	requests := make([]*novelAIRequest, 0, count)
+	for index := 0; index < count; index++ {
+		slotReq := openAIReq
+		slotReq.N = 1
+		body, err := json.Marshal(slotReq)
+		if err != nil {
+			return nil, 0, err
+		}
+		naiReq, err := convertToNovelAIRequest(body)
+		if err != nil {
+			return nil, 0, err
+		}
+		requests = append(requests, naiReq)
+	}
+
+	naiModel := ""
+	if len(requests) > 0 {
+		naiModel = requests[0].Model
+	}
+
 	succeededCount := 0
-	for index := 0; index < count; index++ {
-		result := <-resultCh
-		if result.Err != nil {
-			log.Printf("NovelAI single-image request failed: slot=%d err=%v", result.Index, result.Err)
-			if firstErr == nil {
-				firstErr = result.Err
-			}
-			continue
-		}
-		succeededCount++
-		ordered[result.Index] = result.Data
-	}
+	var firstErr error
 
-	merged := make([]map[string]interface{}, 0, count)
-	for _, item := range ordered {
-		merged = append(merged, item...)
-	}
-	if len(merged) == 0 {
-		if firstErr != nil {
-			return nil, 0, firstErr
-		}
-		return nil, 0, errors.New("NovelAI 响应中未找到有效图片")
+	merged, err := withNovelAIQueue(ctx, channel, naiModel, userID, count, onQueueUpdate,
+		func(entry *novelAIQueueEntry) ([]map[string]interface{}, error) {
+			queue := novelAIQueueFor(channel)
+			ordered := make([][]map[string]interface{}, count)
+
+			for index, naiReq := range requests {
+				// 客户端断开就别再往下出图了：既省 Anlas，也尽快让出队列。
+				if ctx.Err() != nil {
+					if firstErr == nil {
+						firstErr = errNovelAIRequestCanceled
+					}
+					break
+				}
+
+				data, _, err := doNovelAIUpstreamRequest(ctx, channel, naiReq)
+				if err != nil {
+					// 单张失败不中断整批：剩下的继续出，末尾按实际成功张数部分退款。
+					log.Printf("NovelAI batch image failed: slot=%d/%d err=%v", index+1, count, err)
+					if firstErr == nil {
+						firstErr = err
+					}
+				} else {
+					ordered[index] = data
+					succeededCount++
+				}
+
+				// 无论成败都要递减：这张已经不再占用后面人的等待时间了。
+				if entry != nil {
+					queue.markProgress(entry.Ticket(), count-index-1)
+				}
+				if onImageDone != nil {
+					onImageDone(index+1, count)
+				}
+			}
+
+			merged := make([]map[string]interface{}, 0, count)
+			for _, item := range ordered {
+				merged = append(merged, item...)
+			}
+			if len(merged) == 0 {
+				if firstErr != nil {
+					return nil, firstErr
+				}
+				return nil, errors.New("NovelAI 响应中未找到有效图片")
+			}
+			return merged, nil
+		})
+	if err != nil {
+		return nil, 0, err
 	}
 	if firstErr != nil {
 		log.Printf("NovelAI batch completed with partial failures: requested=%d succeeded=%d", count, succeededCount)
@@ -944,31 +1009,114 @@ func requestNovelAISingleImageBatch(ctx context.Context, openAIReq openAIImageRe
 }
 
 // withNovelAIFreeGenerationLock 在免费生图锁下串行执行 fn。
-// 等锁期间必须响应 ctx 取消：反代 502 后客户端已断开，若还在这里死等，
-// 请求会持续堆积、锁越排越长，表现为"之后每次都 502，只能删控件"。
+// 现在是 withNovelAIQueue 的薄封装（images=1、无用户标识、不回调进度），
+// 保留该签名是为了不动现有调用点与验证串行语义的既有测试。
 func withNovelAIFreeGenerationLock(ctx context.Context, channel model.ModelChannel, fn func() ([]map[string]interface{}, error)) ([]map[string]interface{}, error) {
-	if channel.FreeGenerationLock == nil || !channel.FreeGenerationLock.Enabled {
+	return withNovelAIQueue(ctx, channel, "", "", 1, nil, func(*novelAIQueueEntry) ([]map[string]interface{}, error) {
 		return fn()
+	})
+}
+
+// novelAIQueueUpdateInterval 是等锁期间回调排队状态的周期。
+// Phase 2 的 SSE 心跳会用它：只要每 2 秒往下游写一次事件，
+// 就能在 Cloudflare 的 100s 响应头超时之前先把响应头发出去，从根上消灭 524。
+const novelAIQueueUpdateInterval = 2 * time.Second
+
+// withNovelAIQueue 在渠道级 FIFO 队列中串行执行 fn，并可周期性汇报排队状态。
+//
+// userID 用于单用户配额统计（空串表示不限制该维度）；images 是本次要生成的张数，
+// 用于计算「前方还有多少张图」；onQueueUpdate 非 nil 时会在等锁期间被周期调用，
+// 参数为当前前方待生成张数与预估等待秒数 —— Phase 2 的 SSE 推送就挂在这里。
+//
+// ⚠️ naiModel 必须是**已解析的 NovelAI 模型 ID**（如 nai-diffusion-4-5-full），
+// 即 recordNovelAIDuration 记录 EWMA 样本时用的同一个 key。曾经这里误传 channel.Name
+// （渠道名，如「NovelAI官方」），与记录侧的模型 ID 永不匹配，导致 EWMA 样本永远查不到、
+// 预估恒定回落冷启动值：V3 用户被告知等 12s 实际只需 2s。改动时务必保持两侧 key 一致。
+//
+// ⚠️ dequeue 与 release 必须 defer：ctx 取消路径同样要清理干净。
+// 漏掉任何一个都会导致锁泄漏或队列条目残留，后续所有请求会永久卡死
+// （历史上就是这类泄漏造成「之后每次都 502，只能删控件」）。
+func withNovelAIQueue(
+	ctx context.Context,
+	channel model.ModelChannel,
+	naiModel string,
+	userID string,
+	images int,
+	onQueueUpdate func(imagesAhead int, estimatedSeconds int),
+	fn func(entry *novelAIQueueEntry) ([]map[string]interface{}, error),
+) ([]map[string]interface{}, error) {
+	// 未启用免费生图锁的渠道是付费并发模式，不需要排队。
+	if channel.FreeGenerationLock == nil || !channel.FreeGenerationLock.Enabled {
+		return fn(nil)
 	}
 
-	key := novelAIFreeGenerationLockKey(channel)
-	value, _ := novelAIFreeGenerationLocks.LoadOrStore(key, make(chan struct{}, 1))
-	slot := value.(chan struct{})
+	if images <= 0 {
+		images = 1
+	}
 
-	// 用带缓冲 channel 当可取消的互斥量：sync.Mutex 的 Lock 无法被 ctx 打断。
-	select {
-	case slot <- struct{}{}:
-	case <-ctx.Done():
+	queue := novelAIQueueFor(channel)
+	limits := novelAIQueueLimitsFrom(channel.FreeGenerationLock)
+
+	entry, err := queue.enqueue(userID, images, limits)
+	if err != nil {
+		return nil, err
+	}
+	// 先 defer dequeue：下面任何一条 return 路径（含 ctx 取消）都要注销票号。
+	defer queue.dequeue(entry.ticket)
+
+	if onQueueUpdate != nil {
+		// 立即汇报一次，让调用方在开始等待前就能拿到初始排队位置。
+		ahead := queue.imagesAhead(entry.ticket)
+		onQueueUpdate(ahead, estimateNovelAISeconds(naiModel, ahead+images, limits.EstimatedSecondsPerImage))
+
+		// 周期汇报只在等锁期间存活，通过 stop 保证 acquire 返回后立刻退出，
+		// 不会泄漏 goroutine，也不会在 fn 执行期间继续推送排队事件。
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			ticker := time.NewTicker(novelAIQueueUpdateInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					ahead := queue.imagesAhead(entry.ticket)
+					onQueueUpdate(ahead, estimateNovelAISeconds(naiModel, ahead+images, limits.EstimatedSecondsPerImage))
+				}
+			}
+		}()
+	}
+
+	waitStart := time.Now()
+	imagesAheadAtEntry := queue.imagesAhead(entry.ticket)
+	if err := queue.acquire(ctx); err != nil {
+		log.Printf(
+			"NovelAI queue canceled while waiting: ticket=%d wait=%.1fs imagesAhead=%d queued=%d",
+			entry.ticket, time.Since(waitStart).Seconds(), imagesAheadAtEntry, queue.queuedImages(),
+		)
 		return nil, errors.New("请求已取消")
 	}
-	defer func() { <-slot }()
+	defer queue.release()
+
+	waitSeconds := time.Since(waitStart).Seconds()
 
 	// 拿到锁后再确认一次：可能是在排队期间断开的。
 	if ctx.Err() != nil {
+		log.Printf("NovelAI queue canceled after acquire: ticket=%d wait=%.1fs", entry.ticket, waitSeconds)
 		return nil, errors.New("请求已取消")
 	}
 
-	return fn()
+	if imagesAheadAtEntry > 0 || waitSeconds >= 1 {
+		log.Printf(
+			"NovelAI queue acquired: ticket=%d wait=%.1fs imagesAhead=%d images=%d queued=%d",
+			entry.ticket, waitSeconds, imagesAheadAtEntry, images, queue.queuedImages(),
+		)
+	}
+
+	return fn(entry)
 }
 
 func novelAIFreeGenerationLockKey(channel model.ModelChannel) string {
@@ -981,17 +1129,62 @@ func novelAIFreeGenerationLockKey(channel model.ModelChannel) string {
 }
 
 // novelAIHTTPClient 专用客户端。
-// 必须设超时：V4.5 Full 单张就要 10s+，用 http.DefaultClient（零超时）意味着
-// 上游卡住时 goroutine 会永久持有免费生图锁，把后续所有请求一起拖死。
-var novelAIHTTPClient = &http.Client{Timeout: 5 * time.Minute}
+// Timeout 是**单张出图**的预算，不含排队等待：V4.5 Full 实测约 12s，120s 已有
+// 10 倍余量；排队时长由队列机制（withNovelAIQueue）管控，不靠这个超时兜。
+// 原来设 5 分钟远超 Cloudflare 的 100s 预算，只会造成「CF 已断开、后端还在跑、
+// Anlas 已扣但用户拿不到图」的纯白烧，因此必须收敛到单张量级。
+// 另外绝不能用 http.DefaultClient（零超时）：上游卡住时 goroutine 会永久持有
+// 串行锁，把后续所有请求一起拖死。
+var novelAIHTTPClient = &http.Client{Timeout: 120 * time.Second}
 
-// requestNovelAIImageData 向上游发起一次生图请求。
+// requestNovelAIImageData 排队并向上游发起一次单张生图请求。
 // ctx 来自客户端请求，反代超时/用户取消时会被取消，从而尽快释放免费生图锁，
 // 避免"前端已 502、后端还在跑"导致后续请求排队雪崩。
+//
+// 注意：本函数会自己占一个队列名额。批量出图（requestNovelAISingleImageBatch）
+// 已经在外层持有名额，绝不能再调用它 —— 那会嵌套排队自我死锁。批量请走
+// doNovelAIUpstreamRequest（不排队版）。
 func requestNovelAIImageData(ctx context.Context, channel model.ModelChannel, naiReq *novelAIRequest) ([]map[string]interface{}, error) {
+	// enqueuedAt 在排队之前打点，这样 wait 才是真实的「等锁耗时」。
+	enqueuedAt := time.Now()
+	return withNovelAIQueue(ctx, channel, naiReq.Model, "", 1, nil, func(entry *novelAIQueueEntry) ([]map[string]interface{}, error) {
+		// 排查 524/502 时最关键的两个数字：等锁多久、上游出图多久。
+		// 二者混在一起看不出到底是队列太长还是上游变慢，所以必须分开统计。
+		waitSeconds := time.Since(enqueuedAt).Seconds()
+		imagesAhead := 0
+		if entry != nil {
+			imagesAhead = novelAIQueueFor(channel).imagesAhead(entry.Ticket())
+		}
+
+		data, upstreamDuration, err := doNovelAIUpstreamRequest(ctx, channel, naiReq)
+		if err != nil {
+			log.Printf(
+				"NovelAI request failed: model=%s wait=%.1fs upstream=%.1fs imagesAhead=%d err=%v",
+				naiReq.Model, waitSeconds, upstreamDuration.Seconds(), imagesAhead, err,
+			)
+			return nil, err
+		}
+
+		log.Printf(
+			"NovelAI request done: model=%s wait=%.1fs upstream=%.1fs imagesAhead=%d images=%d",
+			naiReq.Model, waitSeconds, upstreamDuration.Seconds(), imagesAhead, len(data),
+		)
+		return data, nil
+	})
+}
+
+// doNovelAIUpstreamRequest 只负责「打一次上游、解析出图片」，**不排队**。
+//
+// 拆出这一层是为了让批量出图能在「持有单个队列名额」的前提下串行出多张：
+// 若批量复用 requestNovelAIImageData，会在已持有名额时再次入队，直接自我死锁。
+//
+// 返回的 duration 是本次上游耗时，调用方用它喂 EWMA / 打日志。
+// 只在成功出图时喂 EWMA 样本：失败/取消的耗时（秒回的 500、瞬断的客户端）
+// 混进平均值会让预估严重偏低，用户看到"还剩 3 秒"却等了半分钟，比不显示更糟。
+func doNovelAIUpstreamRequest(ctx context.Context, channel model.ModelChannel, naiReq *novelAIRequest) ([]map[string]interface{}, time.Duration, error) {
 	naiBody, err := json.Marshal(naiReq)
 	if err != nil {
-		return nil, errors.New("构建 NovelAI 请求失败")
+		return nil, 0, errors.New("构建 NovelAI 请求失败")
 	}
 
 	if novelAIDebugEnabled() {
@@ -1001,45 +1194,50 @@ func requestNovelAIImageData(ctx context.Context, channel model.ModelChannel, na
 	}
 
 	naiURL := buildNovelAIURL(channel.BaseURL, "/ai/generate-image")
+	upstreamStart := time.Now()
 
-	return withNovelAIFreeGenerationLock(ctx, channel, func() ([]map[string]interface{}, error) {
-		// 请求在锁内构建：等锁期间若客户端已断开，就不必再打上游。
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, naiURL, bytes.NewReader(naiBody))
-		if err != nil {
-			return nil, errors.New("创建 NovelAI 请求失败")
-		}
-		request.Header.Set("Authorization", "Bearer "+channel.APIKey)
-		request.Header.Set("Content-Type", "application/json")
+	// 请求在锁内构建：等锁期间若客户端已断开，就不必再打上游。
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, naiURL, bytes.NewReader(naiBody))
+	if err != nil {
+		return nil, time.Since(upstreamStart), errors.New("创建 NovelAI 请求失败")
+	}
+	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	request.Header.Set("Content-Type", "application/json")
 
-		response, err := novelAIHTTPClient.Do(request)
-		if err != nil {
-			if ctx.Err() != nil {
-				log.Printf("NovelAI request canceled by client: url=%s", naiURL)
-				return nil, errors.New("请求已取消")
-			}
-			log.Printf("NovelAI request failed: url=%s err=%v", naiURL, err)
-			return nil, errors.New("NovelAI 接口请求失败")
+	response, err := novelAIHTTPClient.Do(request)
+	if err != nil {
+		if ctx.Err() != nil {
+			log.Printf("NovelAI request canceled by client: model=%s url=%s", naiReq.Model, naiURL)
+			return nil, time.Since(upstreamStart), errNovelAIRequestCanceled
 		}
-		defer response.Body.Close()
+		log.Printf("NovelAI upstream transport error: model=%s url=%s err=%v", naiReq.Model, naiURL, err)
+		return nil, time.Since(upstreamStart), errors.New("NovelAI 接口请求失败")
+	}
+	defer response.Body.Close()
 
-		if response.StatusCode >= http.StatusBadRequest {
-			body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-			log.Printf("NovelAI upstream error: status=%d body=%s", response.StatusCode, string(body))
-			return nil, errors.New(readNovelAIError(response.StatusCode, body))
-		}
+	if response.StatusCode >= http.StatusBadRequest {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		log.Printf(
+			"NovelAI upstream error: model=%s status=%d upstream=%.1fs body=%s",
+			naiReq.Model, response.StatusCode, time.Since(upstreamStart).Seconds(), string(body),
+		)
+		return nil, time.Since(upstreamStart), errors.New(readNovelAIError(response.StatusCode, body))
+	}
 
-		zipData, err := io.ReadAll(response.Body)
-		if err != nil {
-			log.Printf("NovelAI response read failed: %v", err)
-			return nil, errors.New("读取 NovelAI 响应失败")
-		}
-		data, err := extractNovelAIImageData(zipData)
-		if err != nil {
-			log.Printf("NovelAI response conversion failed: %v", err)
-			return nil, fmt.Errorf("NovelAI 响应转换失败: %w", err)
-		}
-		return data, nil
-	})
+	zipData, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Printf("NovelAI response read failed: model=%s err=%v", naiReq.Model, err)
+		return nil, time.Since(upstreamStart), errors.New("读取 NovelAI 响应失败")
+	}
+	data, err := extractNovelAIImageData(zipData)
+	if err != nil {
+		log.Printf("NovelAI response conversion failed: model=%s err=%v", naiReq.Model, err)
+		return nil, time.Since(upstreamStart), fmt.Errorf("NovelAI 响应转换失败: %w", err)
+	}
+
+	upstreamDuration := time.Since(upstreamStart)
+	recordNovelAIDuration(naiReq.Model, upstreamDuration)
+	return data, upstreamDuration, nil
 }
 
 // 构建 NovelAI URL

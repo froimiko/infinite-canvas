@@ -29,6 +29,13 @@ type FreeGenerationLock struct {
 	MaxSteps       int  `json:"maxSteps"`       // 最大步数（默认 28）
 	ForceCountOne  bool `json:"forceCountOne"`  // 强制单张生成（默认 true）
 	DisableImg2Img bool `json:"disableImg2Img"` // 禁用图生图（默认 true）
+
+	// 以下三项服务于排队队列内核（Phase 1）。
+	// 注意：这里刻意不提供「并发度」开关 —— NovelAI Opus 免费生图不支持并发，
+	// 暴露该开关只会诱导误配置，导致违反条款或被上游限流。渠道级串行是硬约束。
+	EstimatedSecondsPerImage int `json:"estimatedSecondsPerImage"` // 单张预估耗时冷启动值，秒（默认 12；有真实样本后按 EWMA 走）
+	MaxUserQueuedImages      int `json:"maxUserQueuedImages"`      // 单用户队列内最大张数（默认 20，防单人灌满队列）
+	MaxQueuedImages          int `json:"maxQueuedImages"`          // 全队列绝对兜底张数（默认 500，仅防内存失控，正常不触发）
 }
 
 // ModelCost 模型算力点配置。
