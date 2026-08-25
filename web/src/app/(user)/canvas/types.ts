@@ -51,6 +51,13 @@ export type CanvasNodeMetadata = Partial<NovelAISettings> & {
     naAddOriginalImage?: boolean;
     status?: CanvasNodeStatus;
     errorDetails?: string;
+    /**
+     * 生成中的排队提示文案（如「排队中，前方还有 3 张，约 36 秒」）。
+     *
+     * 仅 NovelAI SSE 路径会写入：免费生图不支持并发、全站串行排队，
+     * 没有这个提示时长时间等待看起来就像卡死了。生成结束必须清掉。
+     */
+    queueHint?: string;
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;

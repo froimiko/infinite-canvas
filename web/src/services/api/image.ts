@@ -84,8 +84,23 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal; negativePrompt?: string };
+type RequestOptions = { signal?: AbortSignal; negativePrompt?: string; onQueueProgress?: (progress: ImageQueueProgress) => void };
 export type ImageRequestOptions = RequestOptions;
+
+/**
+ * NovelAI 排队/出图进度。
+ *
+ * status:
+ *  - queued     排队中，imagesAhead 是「前方还有多少张图要生成」
+ *  - generating 正在出图，current/total 表示批量进度
+ */
+export type ImageQueueProgress = {
+    status: "queued" | "generating";
+    imagesAhead?: number;
+    estimatedSeconds?: number;
+    current?: number;
+    total?: number;
+};
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -239,6 +254,12 @@ function readAxiosError(error: unknown, fallback: string) {
 function readStatusError(status: number | undefined, fallback: string) {
     if (status === 401 || status === 403) return "鉴权失败，请检查 API Key、套餐权限或模型权限";
     if (status === 429) return "请求被限流或额度不足，请稍后重试";
+    // 524 是 Cloudflare 的网关超时（源站 100s 内没返回响应头），504/408 同类。
+    // 这类情况后端往往还在正常出图，只是网关先断开了，所以要提示「可能已在出图」，
+    // 避免用户以为参数错了反复改设置。
+    if (status === 524 || status === 504 || status === 408) {
+        return "生图排队超时（服务端可能仍在出图），请稍后重试或减少本次生成张数";
+    }
     return status ? `${fallback}：${status}` : fallback;
 }
 
@@ -636,6 +657,136 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
     return images;
 }
 
+/**
+ * NovelAI 生图 SSE 事件间隔看门狗（毫秒）。
+ *
+ * 排队可能很久（NovelAI 免费生图不支持并发，全站串行），所以不能设「总时长超时」，
+ * 否则会误杀正常的长排队。改为看「事件间隔」：后端排队期每 2s、出图期每 10s 都会
+ * 推事件，因此 60s 静默就说明连接实际已经断了。
+ */
+const NOVELAI_SSE_IDLE_TIMEOUT_MS = 60_000;
+
+/**
+ * 非流式生图请求的超时（毫秒）。
+ *
+ * 略早于 Cloudflare 的 100s 网关超时，这样超时由前端主动抛出可读错误，
+ * 而不是等 CF 返回 524 的 HTML 错误页。
+ */
+const IMAGE_REQUEST_TIMEOUT_MS = 95_000;
+
+/** 是否走 NovelAI 的 SSE 流式生图（仅远程渠道 + 开了 NovelAI 扩展时）。 */
+function useNovelAIStream(config: AiConfig, requestConfig: AiConfig) {
+    return Boolean(config.novelAIEnabled) && requestConfig.channelMode === "remote";
+}
+
+type NovelAISSEState = { buffer: string; images?: { id: string; dataUrl: string }[]; error?: string };
+
+function consumeNovelAISSEBlock(block: string, state: NovelAISSEState, onQueueProgress?: (progress: ImageQueueProgress) => void) {
+    let event = "";
+    const dataLines: string[] = [];
+    for (const line of block.split(/\r?\n/)) {
+        if (line.startsWith(":")) continue; // SSE 注释行（心跳），忽略
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+    }
+    if (!dataLines.length) return;
+
+    let payload: Record<string, unknown>;
+    try {
+        payload = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
+    } catch {
+        return;
+    }
+
+    if (event === "queued") {
+        onQueueProgress?.({
+            status: "queued",
+            imagesAhead: typeof payload.imagesAhead === "number" ? payload.imagesAhead : undefined,
+            estimatedSeconds: typeof payload.estimatedSeconds === "number" ? payload.estimatedSeconds : undefined,
+            total: typeof payload.total === "number" ? payload.total : undefined,
+        });
+        return;
+    }
+    if (event === "generating") {
+        onQueueProgress?.({
+            status: "generating",
+            current: typeof payload.current === "number" ? payload.current : undefined,
+            total: typeof payload.total === "number" ? payload.total : undefined,
+        });
+        return;
+    }
+    if (event === "error") {
+        state.error = typeof payload.message === "string" && payload.message ? payload.message : "生图失败";
+        return;
+    }
+    if (event === "done") {
+        // done 的结构与非 SSE 响应体一致，因此直接复用 parseImagePayload。
+        state.images = parseImagePayload(payload as ImageApiResponse);
+    }
+}
+
+function consumeNovelAISSEText(state: NovelAISSEState, text: string, onQueueProgress?: (progress: ImageQueueProgress) => void, flush = false) {
+    state.buffer += text;
+    for (;;) {
+        const match = state.buffer.match(/\r?\n\r?\n/);
+        if (!match) break;
+        consumeNovelAISSEBlock(state.buffer.slice(0, match.index), state, onQueueProgress);
+        state.buffer = state.buffer.slice((match.index || 0) + match[0].length);
+    }
+    if (flush && state.buffer.trim()) {
+        consumeNovelAISSEBlock(state.buffer, state, onQueueProgress);
+        state.buffer = "";
+    }
+}
+
+/**
+ * 以 SSE 方式请求 NovelAI 生图。
+ *
+ * 后端会在**入队之前**就发出响应头，并在排队/出图期间持续推事件，
+ * 因此本请求不会触发 Cloudflare 的 524（那个限制针对响应头 TTFB）。
+ * 排队进度通过 options.onQueueProgress 上抛，用于显示「前方还有 N 张图」。
+ */
+async function requestNovelAIGenerationStream(config: AiConfig, requestBody: Record<string, unknown>, options?: RequestOptions) {
+    const response = await fetch(aiApiUrl(config, "/images/generations"), {
+        method: "POST",
+        headers: { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" },
+        body: JSON.stringify(requestBody),
+        signal: options?.signal,
+    });
+    if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
+
+    // 后端在校验/扣费失败时仍会返回普通 JSON（那时还没发 SSE 响应头），这里兼容它。
+    const contentType = response.headers.get("Content-Type") || "";
+    if (!response.body || !contentType.includes("text/event-stream")) {
+        return parseImagePayload((await response.json()) as ImageApiResponse);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const state: NovelAISSEState = { buffer: "" };
+    for (;;) {
+        // 看门狗只约束「事件间隔」，不约束总时长：排队本身可以很久。
+        const read = await Promise.race([
+            reader.read(),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("生图连接已中断，请重试")), NOVELAI_SSE_IDLE_TIMEOUT_MS)),
+        ]).catch((error: unknown) => {
+            void reader.cancel().catch(() => {});
+            throw error instanceof Error ? error : new Error("生图连接已中断，请重试");
+        });
+        if (read.done) break;
+        consumeNovelAISSEText(state, decoder.decode(read.value, { stream: true }), options?.onQueueProgress);
+        if (state.error) {
+            void reader.cancel().catch(() => {});
+            throw new Error(state.error);
+        }
+        if (state.images) break;
+    }
+    consumeNovelAISSEText(state, decoder.decode(), options?.onQueueProgress, true);
+    if (state.error) throw new Error(state.error);
+    if (!state.images?.length) throw new Error("接口没有返回图片");
+    return state.images;
+}
+
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
@@ -651,25 +802,37 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const useNovelAISize = Boolean(config.novelAIEnabled);
     const requestSize = useNovelAISize ? resolveNovelAIRequestSize(config.size) : resolveRequestSize(quality, config.size);
     const negativePrompt = normalizedNegativePrompt(options);
+    const requestBody = {
+        model: requestConfig.model,
+        prompt: withSystemPrompt(requestConfig, prompt),
+        ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
+        n,
+        ...(quality ? { quality } : {}),
+        ...(requestSize ? { size: requestSize } : {}),
+        response_format: "b64_json",
+        output_format: IMAGE_OUTPUT_FORMAT,
+        ...buildNovelAIRequestParameters(config),
+    };
+
+    // NovelAI 走 SSE：免费生图不支持并发，全站串行排队，V4.5 单张就要 11-12s。
+    // 同步请求在排队期一个字节都不返回，排到第 9 位就会撞上 Cloudflare 的 100s
+    // 响应头超时（524）。SSE 分支让后端在入队前就发出响应头并持续推进度事件，
+    // 既绕过 524，又能显示「前方还有 N 张图」。
+    if (useNovelAIStream(config, requestConfig)) {
+        try {
+            return await requestNovelAIGenerationStream(requestConfig, requestBody, options);
+        } catch (error) {
+            throw new Error(readAxiosError(error, "请求失败"));
+        }
+    }
+
     try {
-        const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
-            {
-                model: requestConfig.model,
-                prompt: withSystemPrompt(requestConfig, prompt),
-                ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
-                n,
-                ...(quality ? { quality } : {}),
-                ...(requestSize ? { size: requestSize } : {}),
-                response_format: "b64_json",
-                output_format: IMAGE_OUTPUT_FORMAT,
-                ...buildNovelAIRequestParameters(config),
-            },
-            {
-                headers: aiHeaders(requestConfig, "application/json"),
-                signal: options?.signal,
-            },
-        );
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/generations"), requestBody, {
+            headers: aiHeaders(requestConfig, "application/json"),
+            signal: options?.signal,
+            // 略早于 Cloudflare 的 100s，这样拿到的是可读的中文错误而不是 CF 的 HTML 错误页。
+            timeout: IMAGE_REQUEST_TIMEOUT_MS,
+        });
         const images = parseImagePayload(response.data);
         return images;
     } catch (error) {
@@ -713,7 +876,13 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
+        // 注意：NovelAI 协议后端只支持 /images/generations（且免费生图锁禁用图生图），
+        // 因此这条路径不会走 NovelAI SSE，只需补上超时即可。
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, {
+            headers: aiHeaders(requestConfig),
+            signal: options?.signal,
+            timeout: IMAGE_REQUEST_TIMEOUT_MS,
+        });
         const images = parseImagePayload(response.data);
         return images;
     } catch (error) {

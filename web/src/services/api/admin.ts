@@ -171,6 +171,12 @@ export type AdminModelChannel = {
         maxSteps: number;
         forceCountOne: boolean;
         disableImg2Img: boolean;
+        /** 单张预估耗时（秒），仅在没有历史样本时作为冷启动值。 */
+        estimatedSecondsPerImage?: number;
+        /** 单用户在该渠道队列中的最大排队张数，防一个人灌满队列。 */
+        maxUserQueuedImages?: number;
+        /** 全队列绝对上限（张），仅防内存失控，正常不会触发。 */
+        maxQueuedImages?: number;
     };
 };
 

@@ -6,7 +6,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { BookOpen, Bot, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
-import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { requestEdit, requestGeneration, requestImageQuestion, type ImageQueueProgress } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { DOCS_URL } from "@/constant/env";
@@ -1539,11 +1539,7 @@ function InfiniteCanvasPage() {
 
     /** 把文本节点的正文与译文互换。 */
     const handleSwapTextTranslation = useCallback((node: CanvasNodeData) => {
-        setNodes((prev) =>
-            prev.map((item) =>
-                item.id === node.id ? { ...item, metadata: { ...item.metadata, content: item.metadata?.textTranslation || "", textTranslation: item.metadata?.content || "" } } : item,
-            ),
-        );
+        setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, content: item.metadata?.textTranslation || "", textTranslation: item.metadata?.content || "" } } : item)));
     }, []);
 
     const toggleBatchExpanded = useCallback((nodeId: string) => {
@@ -2211,12 +2207,18 @@ function InfiniteCanvasPage() {
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
                     let hasSuccess = false;
                     let hasFailure = false;
+                    const applyQueueHint = (targetId: string, progress: ImageQueueProgress) => {
+                        // NovelAI 免费生图串行排队，把「前方还有几张」写进节点 metadata 供 LoadingContent 显示。
+                        const hint = formatCanvasQueueHint(progress);
+                        setNodes((prev) => prev.map((node) => (node.id === targetId && node.metadata?.status === "loading" ? { ...node, metadata: { ...node.metadata, queueHint: hint } } : node)));
+                    };
                     await Promise.all(
                         targetIds.map(async (targetId) => {
+                            const slotOptions = { ...requestOptions, signal: controller.signal, onQueueProgress: (progress: ImageQueueProgress) => applyQueueHint(targetId, progress) };
                             try {
                                 const image = referenceImages.length
-                                    ? await requestEdit({ ...novelAIGenerationConfig, count: "1" }, requestPrompt, referenceImages, undefined, { ...requestOptions, signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...novelAIGenerationConfig, count: "1" }, requestPrompt, { ...requestOptions, signal: controller.signal }).then((items) => items[0]);
+                                    ? await requestEdit({ ...novelAIGenerationConfig, count: "1" }, requestPrompt, referenceImages, undefined, slotOptions).then((items) => items[0])
+                                    : await requestGeneration({ ...novelAIGenerationConfig, count: "1" }, requestPrompt, slotOptions).then((items) => items[0]);
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {
@@ -2252,6 +2254,9 @@ function InfiniteCanvasPage() {
                                 hasFailure = true;
                                 setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
                             } finally {
+                                // queueHint 必须在这里清：成功/失败/取消三条路径都会走到 finally。
+                                // 漏清会让排队文案残留在节点上，还会被存进项目数据。
+                                setNodes((prev) => prev.map((node) => (node.id === targetId && node.metadata?.queueHint ? { ...node, metadata: { ...node.metadata, queueHint: undefined } } : node)));
                                 finishGenerationRequest(targetId, controller);
                             }
                             return false;
@@ -3446,6 +3451,23 @@ function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
 
 function isGenerationCanceled(error: unknown) {
     return error instanceof Error && (error.message === "请求已取消" || error.name === "AbortError");
+}
+
+/**
+ * 把 NovelAI 排队进度转成节点上的一行提示。
+ *
+ * 免费生图不支持并发、全站串行，长时间等待时用户最需要知道的就是「前方还有几张」。
+ */
+function formatCanvasQueueHint(progress: ImageQueueProgress) {
+    if (progress.status === "queued") {
+        const ahead = progress.imagesAhead ?? 0;
+        if (ahead <= 0) return "排队中，即将开始";
+        const seconds = progress.estimatedSeconds ?? 0;
+        const eta = seconds <= 0 ? "" : seconds < 60 ? `约 ${seconds} 秒` : `约 ${Math.ceil(seconds / 60)} 分钟`;
+        return `排队中，前方 ${ahead} 张${eta ? `，${eta}` : ""}`;
+    }
+    if (progress.total && progress.total > 1 && progress.current) return `生成中 ${progress.current}/${progress.total}`;
+    return "生成中";
 }
 
 function findRetrySourceNode(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {

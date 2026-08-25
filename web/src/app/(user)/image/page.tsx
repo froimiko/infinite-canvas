@@ -12,7 +12,7 @@ import { countEffectiveNovelAICharacters, normalizeNovelAICharacterPrompts, norm
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
-import { requestEdit, requestGeneration } from "@/services/api/image";
+import { requestEdit, requestGeneration, type ImageQueueProgress } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { NovelAISettings, ReferenceImage } from "@/types/image";
@@ -100,6 +100,8 @@ export default function ImagePage() {
     const [promptTranslation, setPromptTranslation] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
+    // NovelAI SSE 排队进度，按结果槽位索引存。只有 NovelAI 流式路径会填充。
+    const [queueProgress, setQueueProgress] = useState<Record<number, ImageQueueProgress>>({});
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [running, setRunning] = useState(false);
     const [logsOpen, setLogsOpen] = useState(false);
@@ -420,7 +422,11 @@ export default function ImagePage() {
         try {
             // 通用生图的 negativePrompt 恒为空串（译文区只作展示）；NovelAI 标签页才会带负面词。
             // 有参考图就走 requestEdit（img2img），此时「附加原图」开关才真正生效。
-            const requestOptions = snapshot.negativePrompt ? { negativePrompt: snapshot.negativePrompt } : undefined;
+            // onQueueProgress 只有 NovelAI 的 SSE 路径会回调，用于显示「前方还有 N 张图」。
+            const requestOptions = {
+                ...(snapshot.negativePrompt ? { negativePrompt: snapshot.negativePrompt } : {}),
+                onQueueProgress: (progress: ImageQueueProgress) => setQueueProgress((value) => ({ ...value, [index]: progress })),
+            };
             const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
@@ -431,6 +437,13 @@ export default function ImagePage() {
         } catch (error) {
             setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败" }));
             throw error;
+        } finally {
+            // 无论成败都要清掉，否则重试时会残留上一轮的排队文案。
+            setQueueProgress((value) => {
+                const next = { ...value };
+                delete next[index];
+                return next;
+            });
         }
     };
 
@@ -535,7 +548,7 @@ export default function ImagePage() {
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} />
+                                        <PendingImageCard key={result.id} progress={queueProgress[index]} />
                                     ),
                                 )}
                             </div>
@@ -630,7 +643,7 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({ progress }: { progress?: ImageQueueProgress }) {
     return (
         <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
             <div
@@ -640,12 +653,39 @@ function PendingImageCard() {
                     backgroundSize: "16px 16px",
                 }}
             />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
-                <span>生成中</span>
+                <span>{formatQueueProgress(progress)}</span>
+                {progress?.status === "queued" ? <span className="text-xs text-stone-400 dark:text-stone-500">NovelAI 免费生图需排队，请勿关闭页面</span> : null}
             </div>
         </div>
     );
+}
+
+/**
+ * 把排队进度转成人话。
+ *
+ * NovelAI 免费生图不支持并发，全站串行，所以「前方还有几张」是用户最关心的信息 ——
+ * 有了它，长时间等待就从「卡住了？」变成「还有 3 张，约 36 秒」。
+ */
+function formatQueueProgress(progress?: ImageQueueProgress) {
+    if (!progress) return "生成中";
+    if (progress.status === "queued") {
+        const ahead = progress.imagesAhead ?? 0;
+        if (ahead <= 0) return "排队中，即将开始";
+        const eta = formatQueueEta(progress.estimatedSeconds);
+        return `排队中，前方还有 ${ahead} 张${eta ? `，${eta}` : ""}`;
+    }
+    if (progress.total && progress.total > 1 && progress.current) {
+        return `生成中 ${progress.current}/${progress.total}`;
+    }
+    return "生成中";
+}
+
+function formatQueueEta(seconds?: number) {
+    if (!seconds || seconds <= 0) return "";
+    if (seconds < 60) return `约 ${seconds} 秒`;
+    return `约 ${Math.ceil(seconds / 60)} 分钟`;
 }
 
 function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {

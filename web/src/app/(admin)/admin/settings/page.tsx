@@ -77,6 +77,9 @@ const emptyChannel: AdminModelChannel = {
         maxPixels: 1048576, // 1024×1024
         maxSteps: 28,
         forceCountOne: true,
+        estimatedSecondsPerImage: 12,
+        maxUserQueuedImages: 20,
+        maxQueuedImages: 500,
         disableImg2Img: true,
     },
 };
@@ -1076,6 +1079,30 @@ export default function AdminSettingsPage() {
                                                             <Col span={12}>
                                                                 <Form.Item name={["freeGenerationLock", "disableImg2Img"]} valuePropName="checked">
                                                                     <Checkbox>禁用图生图</Checkbox>
+                                                                </Form.Item>
+                                                            </Col>
+                                                        </Row>
+                                                        <div className="mt-3 rounded bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                                                            <div className="mb-1 font-medium">排队设置</div>
+                                                            NovelAI 免费生图<strong>不支持并发</strong>，同一 Token 下所有用户串行排队，这是预期行为，不是故障。
+                                                            请求会通过 SSE 流式返回排队进度，因此不会触发 Cloudflare 524；队列长度不设上限，用户可自行取消。
+                                                            <br />
+                                                            想提升吞吐只能增加不同 Token 的渠道（每个 Token 是一条独立队列，系统会按权重自动分流）。
+                                                        </div>
+                                                        <Row gutter={12} className="mt-2">
+                                                            <Col span={8}>
+                                                                <Form.Item name={["freeGenerationLock", "estimatedSecondsPerImage"]} label="单张预估耗时(秒)" tooltip="仅冷启动用；系统会按模型统计真实耗时的滑动平均来预估等待时间">
+                                                                    <InputNumber min={1} max={600} className="w-full" />
+                                                                </Form.Item>
+                                                            </Col>
+                                                            <Col span={8}>
+                                                                <Form.Item name={["freeGenerationLock", "maxUserQueuedImages"]} label="单用户最大排队张数" tooltip="防止一个用户用批量把队列灌满，导致其他人无限期等待">
+                                                                    <InputNumber min={1} max={200} className="w-full" />
+                                                                </Form.Item>
+                                                            </Col>
+                                                            <Col span={8}>
+                                                                <Form.Item name={["freeGenerationLock", "maxQueuedImages"]} label="队列绝对上限(张)" tooltip="仅用于防止内存无限增长，正常流量不会触发">
+                                                                    <InputNumber min={10} max={5000} className="w-full" />
                                                                 </Form.Item>
                                                             </Col>
                                                         </Row>
