@@ -237,6 +237,19 @@ func convertToNovelAIRequest(openAIBody []byte) (*novelAIRequest, error) {
 	}
 
 	usesStructuredPrompt := usesNovelAIStructuredPrompt(model)
+
+	// 采样器按模型能力归一化：DDIM 在 V4+ 不被支持，直接发会让上游返回 500。
+	// 必须放在 usesStructuredPrompt 之后、SMEA 处理之前 —— 因为回退结果会影响
+	// 下面「DDIM 必须关 SMEA」的判定。
+	sampler = mapNovelAISamplerForModel(sampler, model)
+
+	// DDIM 系采样器与 SMEA 互斥（参考实现 image_params.dart:324-346）。
+	// V4+ 在下面的分支里本就不发 SMEA，这里主要覆盖 V3 + DDIM 的组合。
+	if novelAISamplerDisablesSMEA(sampler) {
+		sm = boolPtr(false)
+		smDyn = boolPtr(false)
+	}
+
 	if openAI.NovelAIEnabled && usesStructuredPrompt {
 		// V4+ 结构化模型拒绝/忽略 SMEA；用 omitempty 指针避免发送。
 		sm = nil
@@ -548,6 +561,51 @@ func normalizeNovelAISampler(value, fallback string) string {
 	default:
 		return fallback
 	}
+}
+
+// mapNovelAISamplerForModel 把采样器按模型能力归一化。
+//
+// ⚠️ 这一步不能省：DDIM 系采样器在 V4 起（V4 / V4.5 / V5）**不被支持**，
+// 原样发上去 NovelAI 会直接返回 500 Internal Server Error。
+//
+// 线上真实故障（2026-08-26）：用户选了 ddim_v3 + nai-diffusion-4-5-full，
+// 连续 4 次请求全部拿到
+//
+//	NovelAI upstream error: model=nai-diffusion-4-5-full status=500
+//	body={"statusCode":500,"message":"Internal Server Error"}
+//
+// 而同一模型换回默认采样器后立刻成功。当时误以为是用户网络问题 —— 其实请求
+// 早就打到上游并拿到了响应（upstream=2.7s），网络不通根本走不到这一步。
+//
+// 归一化规则逐条对齐参考实现 Aaalice_NAI_Launcher
+// （nai_image_generation_api_service.dart:54-74 mapSamplerForModel）：
+//   - V4+：DDIM 不支持 → 回退 k_euler_ancestral
+//   - V3：DDIM → ddim_v3（V3 专用变体）
+//   - 其余组合原样透传
+func mapNovelAISamplerForModel(sampler, naiModel string) string {
+	sampler = strings.ToLower(strings.TrimSpace(sampler))
+	if !strings.Contains(sampler, "ddim") {
+		return sampler
+	}
+
+	// usesNovelAIStructuredPrompt 正好等价于「V4 及以上」，复用它避免再写一份版本判定。
+	if usesNovelAIStructuredPrompt(naiModel) {
+		log.Printf("NovelAI sampler %s not supported by %s, falling back to k_euler_ancestral", sampler, naiModel)
+		return "k_euler_ancestral"
+	}
+	if strings.Contains(naiModel, "diffusion-3") {
+		return "ddim_v3"
+	}
+	return sampler
+}
+
+// novelAISamplerDisablesSMEA 判断该采样器是否必须关闭 SMEA。
+//
+// 参考实现在 sampler 含 ddim 时强制 effectiveSmea/effectiveSmeaDyn = false
+// （image_params.dart:324-346）。V4+ 分支本就不发 SMEA，但 V3 + DDIM 也必须关，
+// 否则是上游不接受的组合。
+func novelAISamplerDisablesSMEA(sampler string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(sampler)), "ddim")
 }
 
 func normalizeNovelAISteps(value *int, fallback int) int {

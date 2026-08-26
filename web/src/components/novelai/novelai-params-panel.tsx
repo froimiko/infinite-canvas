@@ -107,8 +107,15 @@ export function NovelAIParamsPanel({ metadata, theme, onChange, variant = "popov
             </div>
 
             <div className="na-field">
-                <div className="na-label">采样器</div>
-                <NativeSelect value={metadata.novelAISampler || "k_euler_ancestral"} options={NOVELAI_SAMPLERS.map((value) => ({ value, label: SAMPLER_LABELS[value] || value }))} onChange={(value) => onChange({ novelAISampler: value })} />
+                <div className="na-label">采样器{usesStructuredPrompt ? "（V4+ 不支持 DDIM）" : ""}</div>
+                <NativeSelect
+                    // DDIM 在 V4+ 上会让上游直接返回 500，所以这里连显示都不给：
+                    // 后端虽然有兜底回退（mapNovelAISamplerForModel），但让用户选一个
+                    // 「选了也不生效」的选项本身就是误导。
+                    value={usesStructuredPrompt && metadata.novelAISampler === "ddim_v3" ? "k_euler_ancestral" : metadata.novelAISampler || "k_euler_ancestral"}
+                    options={NOVELAI_SAMPLERS.filter((value) => !(usesStructuredPrompt && value === "ddim_v3")).map((value) => ({ value, label: SAMPLER_LABELS[value] || value }))}
+                    onChange={(value) => onChange({ novelAISampler: value })}
+                />
             </div>
 
             <div className="na-field">
