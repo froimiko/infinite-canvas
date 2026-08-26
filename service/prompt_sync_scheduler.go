@@ -43,9 +43,20 @@ func RefreshPromptSyncScheduler() {
 	if setting.Enabled == nil || !*setting.Enabled {
 		return
 	}
-	if _, err := promptSyncCron.AddFunc(setting.Cron, SyncRemotePromptCategories); err != nil {
+	if _, err := promptSyncCron.AddFunc(setting.Cron, safeSyncRemotePromptCategories); err != nil {
 		log.Printf("add prompt sync cron failed cron=%s err=%v", setting.Cron, err)
 	}
+}
+
+// safeSyncRemotePromptCategories 是给 cron 用的带兜底版本。
+//
+// ⚠️ robfig/cron 在自己的 goroutine 里执行 job，**它不会 recover panic**
+// （cron.New() 未配置 Recover 包装器时，job 里的 panic 会直接冒泡杀死进程）。
+// 这个任务默认每 5 分钟跑一次、会去抓外部 GitHub 内容，是典型的
+// 「跑久了才偶发出错」来源 —— 正好符合线上「运行一段时间后 8080 无人监听」的现象。
+func safeSyncRemotePromptCategories() {
+	defer RecoverPanic("prompt-sync-cron")
+	SyncRemotePromptCategories()
 }
 
 func SyncRemotePromptCategories() {

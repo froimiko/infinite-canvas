@@ -1,0 +1,18 @@
+# 强制 shell 脚本使用 LF 换行。
+#
+# ⚠️ 这个文件不是可选的洁癖，而是「容器能不能启动」的硬约束。
+#
+# 本仓库在 Windows 上开发，git 的 core.autocrlf=true 会在 checkout 时把文本
+# 文件转成 CRLF。而 Linux 容器里的 shell 脚本一旦带上 \r，第一行 shebang
+# 会被解析成 `/bin/bash\r`，内核找不到这个解释器，直接报：
+#
+#   exec /app/docker-entrypoint.sh: no such file or directory
+#   （或 bad interpreter: No such file or directory）
+#
+# 表现极具误导性：文件明明存在、权限也对，却说找不到。
+# 因此所有进容器执行的脚本必须锁死 LF。
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
+
+# Dockerfile 本身对换行不敏感，但保持一致更省心。
+Dockerfile text eol=lf

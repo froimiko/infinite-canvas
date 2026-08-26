@@ -1170,6 +1170,9 @@ func withNovelAIQueue(
 		stop := make(chan struct{})
 		defer close(stop)
 		go func() {
+			// ⚠️ panic 兜底：见 novelai_sse.go 同处注释。裸 goroutine 的 panic
+			// 会直接带走整个进程，表现为「8080 突然没人监听」。
+			defer service.RecoverPanic("novelai-queue-progress")
 			ticker := time.NewTicker(novelAIQueueUpdateInterval)
 			defer ticker.Stop()
 			for {

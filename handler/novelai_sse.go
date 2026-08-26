@@ -193,6 +193,11 @@ func streamNovelAIImageRequest(w http.ResponseWriter, r *http.Request, p streamN
 	heartbeatDone := make(chan struct{})
 
 	go func() {
+		// ⚠️ panic 兜底：本 goroutine 里未 recover 的 panic 会**杀死整个进程**
+		// （gin 的 Recovery 只保护请求 goroutine，管不到这里）。
+		// 线上曾出现「跑一阵子后 8080 端口没人监听、必须重启容器」，
+		// 根因就是这类后台 goroutine 裸奔。
+		defer service.RecoverPanic("novelai-sse-heartbeat")
 		defer close(heartbeatDone)
 		ticker := time.NewTicker(novelAIGeneratingHeartbeat)
 		defer ticker.Stop()
